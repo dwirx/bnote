@@ -11,6 +11,14 @@
     "core:window:allow-toggle-maximize",
     "opener:default",
     "dialog:default",
-    "store:default"
+    "store:default",
+    "fs:default",
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [{ "path": "$APPCONFIG" }, { "path": "$APPCONFIG/*" }]
+    },
+    "os:default",
+    "clipboard-manager:default",
+    "process:default"
   ]
 }

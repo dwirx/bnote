@@ -1,16 +1,22 @@
 import { invoke } from "@tauri-apps/api/core";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { message, open, save } from "@tauri-apps/plugin-dialog";
+import { BaseDirectory, exists } from "@tauri-apps/plugin-fs";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { arch, platform, type as osType, version } from "@tauri-apps/plugin-os";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { Store } from "@tauri-apps/plugin-store";
 import { create } from "zustand";
-import type { EditorTab, FileDocument, FileMetadata, ThemeMode } from "@/types";
+import type { CsvViewMode, EditorSettings, EditorTab, FileDocument, FileMetadata, ThemeMode } from "@/types";
 import {
+  EDITOR_SETTINGS_KEY,
   MAX_RECENT_FILES,
   RECENT_FILES_KEY,
   SIDEBAR_COLLAPSED_KEY,
   STORE_FILE,
   THEME_MODE_KEY,
   isDirty,
+  isEditableDocument,
   lineCount,
   tabIdForPath,
   toErrorMessage,
@@ -18,6 +24,7 @@ import {
 
 type AppState = {
   activeTabId: string | null;
+  editorSettings: EditorSettings;
   error: string | null;
   isBusy: boolean;
   isDragActive: boolean;
@@ -27,22 +34,39 @@ type AppState = {
   store: Store | null;
   tabs: EditorTab[];
   themeMode: ThemeMode;
+  checkForUpdates: () => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
+  copyActiveFileInfo: () => Promise<void>;
+  copyActivePath: () => Promise<void>;
   hydratePreferences: () => Promise<void>;
   openActiveExternally: () => Promise<void>;
   openFiles: (paths: string[]) => Promise<void>;
   openFromDialog: () => Promise<void>;
   rememberFile: (path: string) => Promise<void>;
   revealActiveFile: () => Promise<void>;
+  relaunchApp: () => Promise<void>;
   saveActiveTab: () => Promise<boolean>;
   saveActiveTabAs: () => Promise<boolean>;
   saveTab: (tabId: string) => Promise<boolean>;
   setActiveTab: (tabId: string | null) => void;
+  setCsvViewMode: (tabId: string, mode: CsvViewMode) => void;
   setDragActive: (isDragActive: boolean) => void;
+  setEditorFontSize: (fontSize: number) => Promise<void>;
+  setEditorTabSize: (tabSize: number) => Promise<void>;
   setQuery: (query: string) => void;
+  setShowLineNumbers: (showLineNumbers: boolean) => Promise<void>;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
+  setWordWrap: (wordWrap: boolean) => Promise<void>;
+  showSystemInfo: () => Promise<void>;
   toggleSidebar: () => Promise<void>;
   updateActiveContent: (content: string) => void;
+};
+
+const defaultEditorSettings: EditorSettings = {
+  showLineNumbers: true,
+  wordWrap: true,
+  fontSize: 13,
+  tabSize: 2,
 };
 
 function normalizeDialogResult(result: unknown) {
@@ -61,8 +85,13 @@ async function persistValue(store: Store | null, key: string, value: unknown) {
   await store.save();
 }
 
+function defaultCsvViewMode(document: FileDocument): CsvViewMode {
+  return document.kind === "csv" ? "table" : "raw";
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   activeTabId: null,
+  editorSettings: defaultEditorSettings,
   error: null,
   isBusy: false,
   isDragActive: false,
@@ -79,8 +108,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       const recentFiles = await store.get<string[]>(RECENT_FILES_KEY);
       const sidebarCollapsed = await store.get<boolean>(SIDEBAR_COLLAPSED_KEY);
       const themeMode = await store.get<ThemeMode>(THEME_MODE_KEY);
+      const editorSettings = await store.get<Partial<EditorSettings>>(EDITOR_SETTINGS_KEY);
+      await exists(".", { baseDir: BaseDirectory.AppConfig }).catch(() => false);
 
       set({
+        editorSettings: {
+          ...defaultEditorSettings,
+          ...(editorSettings && typeof editorSettings === "object" ? editorSettings : {}),
+        },
         recentFiles: Array.isArray(recentFiles)
           ? recentFiles.filter((path) => typeof path === "string")
           : [],
@@ -128,6 +163,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               id: tabId,
               document,
               content,
+              csvViewMode: defaultCsvViewMode(document),
               lastSavedContent: content,
             },
           ],
@@ -157,7 +193,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   saveTab: async (tabId: string) => {
     const tab = get().tabs.find((candidate) => candidate.id === tabId);
-    if (!tab || tab.document.kind !== "text") return false;
+    if (!tab || !isEditableDocument(tab.document)) return false;
 
     set({ error: null, isBusy: true });
     try {
@@ -175,9 +211,12 @@ export const useAppStore = create<AppState>((set, get) => ({
                   ...candidate.document,
                   ...metadata,
                   content: candidate.content,
-                  kind: "text",
+                  kind: candidate.document.kind,
                   encoding: "utf-8",
+                  editable: true,
                   lineCount: lineCount(candidate.content),
+                  previewBytes: metadata.size,
+                  truncated: false,
                 },
                 lastSavedContent: candidate.content,
               }
@@ -204,7 +243,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const selected = await save({
       title: "Save note as",
       defaultPath: activeTab?.document.name ?? "Untitled.txt",
-      filters: [{ name: "Text files", extensions: ["txt", "md", "json", "ts", "js"] }],
+      filters: [{ name: "Text files", extensions: ["txt", "md", "csv", "json", "ts", "js"] }],
     });
     if (!selected) return false;
 
@@ -230,6 +269,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                 id: nextTabId,
                 document,
                 content: nextContent,
+                csvViewMode: defaultCsvViewMode(document),
                 lastSavedContent: nextContent,
               },
             ],
@@ -244,6 +284,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                   id: nextTabId,
                   document,
                   content: nextContent,
+                  csvViewMode: defaultCsvViewMode(document),
                   lastSavedContent: nextContent,
                 }
               : tab,
@@ -298,13 +339,137 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (activeTab) await revealItemInDir(activeTab.document.path);
   },
 
+  copyActivePath: async () => {
+    const activeTab = get().tabs.find((tab) => tab.id === get().activeTabId);
+    if (!activeTab) return;
+
+    try {
+      await writeText(activeTab.document.path);
+      await message("File path copied to clipboard.", { title: "Clipboard", kind: "info" });
+    } catch (caught) {
+      set({ error: toErrorMessage(caught) });
+    }
+  },
+
+  copyActiveFileInfo: async () => {
+    const activeTab = get().tabs.find((tab) => tab.id === get().activeTabId);
+    if (!activeTab) return;
+
+    const { document } = activeTab;
+    const info = [
+      `Name: ${document.name}`,
+      `Path: ${document.path}`,
+      `Kind: ${document.kind}`,
+      `Size: ${document.size} bytes`,
+      `Encoding: ${document.encoding}`,
+      `Editable: ${document.editable ? "yes" : "no"}`,
+      `Preview bytes: ${document.previewBytes}`,
+    ].join("\n");
+
+    try {
+      await writeText(info);
+      await message("File details copied to clipboard.", { title: "Clipboard", kind: "info" });
+    } catch (caught) {
+      set({ error: toErrorMessage(caught) });
+    }
+  },
+
+  showSystemInfo: async () => {
+    const info = [
+      `Platform: ${platform()}`,
+      `OS: ${osType()}`,
+      `Version: ${version()}`,
+      `Architecture: ${arch()}`,
+    ].join("\n");
+    await message(info, { title: "System Info", kind: "info" });
+  },
+
+  checkForUpdates: async () => {
+    try {
+      const updaterEnabled = await invoke<boolean>("updater_transport_enabled");
+      if (!updaterEnabled) {
+        await message(
+          "Updater transport is not enabled in this build. Use the updater-full release build to check for production updates.",
+          {
+            title: "Updates",
+            kind: "info",
+          },
+        );
+        return;
+      }
+
+      await message(
+        "Updater transport is enabled in this build. Configure a production endpoint and signing keys before publishing updates.",
+        {
+          title: "Updates",
+          kind: "info",
+        },
+      );
+    } catch {
+      await message("Updater is installed, but no production update endpoint is configured yet.", {
+        title: "Updates",
+        kind: "info",
+      });
+    }
+  },
+
+  relaunchApp: async () => {
+    const result = await message("BNote will close and reopen.", {
+      title: "Restart BNote",
+      kind: "warning",
+      buttons: {
+        yes: "Restart",
+        no: "Cancel",
+        cancel: "Cancel",
+      },
+    });
+    const normalized = normalizeDialogResult(result);
+    if (normalized.includes("restart") || normalized === "yes") {
+      await relaunch();
+    }
+  },
+
   setActiveTab: (activeTabId) => set({ activeTabId }),
+  setCsvViewMode: (tabId, mode) =>
+    set((state) => ({
+      tabs: state.tabs.map((tab) => (tab.id === tabId ? { ...tab, csvViewMode: mode } : tab)),
+    })),
   setDragActive: (isDragActive) => set({ isDragActive }),
   setQuery: (query) => set({ query }),
+
+  setEditorFontSize: async (fontSize) => {
+    const nextSettings = {
+      ...get().editorSettings,
+      fontSize: Math.min(22, Math.max(10, fontSize)),
+    };
+    set({ editorSettings: nextSettings });
+    await persistValue(get().store, EDITOR_SETTINGS_KEY, nextSettings);
+  },
+
+  setEditorTabSize: async (tabSize) => {
+    const nextSettings = {
+      ...get().editorSettings,
+      tabSize: [2, 4, 8].includes(tabSize) ? tabSize : 2,
+    };
+    set({ editorSettings: nextSettings });
+    await persistValue(get().store, EDITOR_SETTINGS_KEY, nextSettings);
+  },
+
+  setShowLineNumbers: async (showLineNumbers) => {
+    const nextSettings = { ...get().editorSettings, showLineNumbers };
+    set({ editorSettings: nextSettings });
+    await persistValue(get().store, EDITOR_SETTINGS_KEY, nextSettings);
+  },
 
   setThemeMode: async (themeMode) => {
     set({ themeMode });
     await persistValue(get().store, THEME_MODE_KEY, themeMode);
+  },
+
+  setWordWrap: async (wordWrap) => {
+    const nextSettings = { ...get().editorSettings, wordWrap };
+    set({ editorSettings: nextSettings });
+    await persistValue(get().store, EDITOR_SETTINGS_KEY, nextSettings);
   },
 
   toggleSidebar: async () => {

@@ -1,5 +1,6 @@
 import type { EditorTab, FileDocument } from "../types";
 
+export const EDITOR_SETTINGS_KEY = "editorSettings";
 export const RECENT_FILES_KEY = "recentFiles";
 export const SIDEBAR_COLLAPSED_KEY = "sidebarCollapsed";
 export const STORE_FILE = "settings.json";
@@ -46,7 +47,7 @@ export function tabIdForPath(path: string) {
 }
 
 export function isDirty(tab: EditorTab | null | undefined) {
-  return Boolean(tab?.document.kind === "text" && tab.content !== tab.lastSavedContent);
+  return Boolean(tab?.document.editable && tab.content !== tab.lastSavedContent);
 }
 
 export function lineCount(content: string) {
@@ -87,6 +88,9 @@ export function countWords(content: string) {
 }
 
 export function getLanguageLabel(document: FileDocument | null | undefined) {
+  if (document?.kind === "largeText") return "Large text preview";
+  if (document?.kind === "binary") return "Binary";
+  if (document?.kind === "csv") return "CSV";
   if (!document?.extension) return "Plain text";
   const ext = document.extension.toLowerCase();
   if (ext === "md" || ext === "mdx") return "Markdown";
@@ -95,6 +99,10 @@ export function getLanguageLabel(document: FileDocument | null | undefined) {
   if (ext === "js" || ext === "jsx") return "JavaScript";
   if (textFileExtensions.has(ext)) return ext.toUpperCase();
   return "Text";
+}
+
+export function isEditableDocument(document: FileDocument | null | undefined) {
+  return Boolean(document?.editable);
 }
 
 export function getInitials(name: string) {

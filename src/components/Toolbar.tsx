@@ -3,7 +3,7 @@ import { ExternalLink, FolderOpen, PanelLeft, Save, SaveAll } from "lucide-react
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAppStore } from "@/stores/useAppStore";
-import { isDirty } from "@/utils/files";
+import { isDirty, isEditableDocument } from "@/utils/files";
 
 function ToolButton({
   children,
@@ -54,7 +54,7 @@ export function Toolbar() {
         </ToolButton>
         <ToolButton
           label="Save (Ctrl+S)"
-          disabled={!activeTab || activeTab.document.kind !== "text" || !dirty || isBusy}
+          disabled={!activeTab || !isEditableDocument(activeTab.document) || !dirty || isBusy}
           onClick={() => void saveActiveTab()}
         >
           <Save />

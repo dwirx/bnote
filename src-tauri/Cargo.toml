@@ -14,6 +14,10 @@ edition = "2021"
 name = "bnote_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+default = []
+updater-full = ["dep:tauri-plugin-updater"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -24,3 +28,18 @@ tauri-plugin-dialog = "2"
 tauri-plugin-store = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tauri-plugin-fs = "2.5.1"
+tauri-plugin-os = "2.3.2"
+tauri-plugin-clipboard-manager = "2.3.2"
+tauri-plugin-updater = { version = "2.10.1", default-features = false, features = [
+    "rustls-tls",
+    "zip",
+], optional = true }
+tauri-plugin-process = "2.3.1"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "z"
+panic = "abort"

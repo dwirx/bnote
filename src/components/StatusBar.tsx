@@ -23,10 +23,11 @@ export function StatusBar() {
         <span className="truncate">{document ? shortPath(document.path) : ""}</span>
       </div>
       <div className="flex shrink-0 items-center gap-3">
-        {document?.kind === "text" ? (
+        {document && document.kind !== "binary" ? (
           <>
             <span>{lineCount(content)} lines</span>
             <span>{countWords(content)} words</span>
+            {document.truncated ? <span>preview {formatBytes(document.previewBytes)}</span> : null}
             <span>{document.encoding}</span>
           </>
         ) : (

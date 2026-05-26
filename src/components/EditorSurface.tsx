@@ -1,5 +1,7 @@
 import { AlertTriangle, ExternalLink, FolderOpen, Info, PanelLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CodeEditor } from "@/components/CodeEditor";
+import { CsvPreview } from "@/components/CsvPreview";
 import { useAppStore } from "@/stores/useAppStore";
 import { formatBytes, formatDate } from "@/utils/files";
 
@@ -8,10 +10,12 @@ export function EditorSurface() {
   const error = useAppStore((state) => state.error);
   const isBusy = useAppStore((state) => state.isBusy);
   const isDragActive = useAppStore((state) => state.isDragActive);
+  const editorSettings = useAppStore((state) => state.editorSettings);
   const tabs = useAppStore((state) => state.tabs);
   const openActiveExternally = useAppStore((state) => state.openActiveExternally);
   const openFromDialog = useAppStore((state) => state.openFromDialog);
   const revealActiveFile = useAppStore((state) => state.revealActiveFile);
+  const setCsvViewMode = useAppStore((state) => state.setCsvViewMode);
   const updateActiveContent = useAppStore((state) => state.updateActiveContent);
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const document = activeTab?.document ?? null;
@@ -42,7 +46,7 @@ export function EditorSurface() {
             <div className="space-y-2">
               <h2 className="text-lg font-semibold text-foreground">No File Open</h2>
               <p className="text-sm leading-6 text-muted-foreground">
-                Open or drop a local text file to start editing. BNote keeps file access local and safe.
+                Open or drop a local text, CSV, code, or binary file. Huge files open in preview mode.
               </p>
             </div>
             <Button disabled={isBusy} onClick={() => void openFromDialog()}>
@@ -86,14 +90,48 @@ export function EditorSurface() {
             </div>
           </div>
         </div>
-      ) : (
-        <textarea
-          className="editor-textarea h-full w-full resize-none rounded-lg border border-border bg-editor px-6 py-5 font-mono text-[13px] leading-6 text-editor-foreground outline-none selection:bg-primary/30 focus:border-ring"
-          value={activeTab?.content ?? ""}
-          onChange={(event) => updateActiveContent(event.currentTarget.value)}
-          spellCheck={false}
-          aria-label="File editor"
+      ) : document.kind === "csv" ? (
+        <CsvPreview
+          content={activeTab?.content ?? ""}
+          document={document}
+          mode={activeTab?.csvViewMode ?? "table"}
+          onModeChange={(mode) => {
+            if (activeTab) setCsvViewMode(activeTab.id, mode);
+          }}
+          rawView={
+            <CodeEditor
+              key={`${document.path}:csv-raw`}
+              document={document}
+              value={activeTab?.content ?? ""}
+              settings={editorSettings}
+              readOnly={!document.editable}
+              onChange={updateActiveContent}
+            />
+          }
         />
+      ) : (
+        <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2">
+          {document.truncated ? (
+            <div className="flex items-center justify-between rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
+              <span>
+                Preview mode: showing the first {formatBytes(document.previewBytes)} of {formatBytes(document.size)}.
+                Editing is disabled to keep BNote responsive.
+              </span>
+              <Button size="sm" variant="outline" className="h-7" onClick={() => void openActiveExternally()}>
+                <ExternalLink className="size-3.5" />
+                External
+              </Button>
+            </div>
+          ) : null}
+          <CodeEditor
+            key={document.path}
+            document={document}
+            value={activeTab?.content ?? ""}
+            settings={editorSettings}
+            readOnly={!document.editable}
+            onChange={updateActiveContent}
+          />
+        </div>
       )}
     </section>
   );

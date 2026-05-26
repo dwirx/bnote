@@ -1,4 +1,4 @@
-export type FileKind = "text" | "binary";
+export type FileKind = "text" | "csv" | "largeText" | "binary";
 
 export type FileDocument = {
   path: string;
@@ -10,6 +10,9 @@ export type FileDocument = {
   content: string | null;
   encoding: string;
   lineCount: number;
+  editable: boolean;
+  truncated: boolean;
+  previewBytes: number;
 };
 
 export type FileMetadata = {
@@ -24,7 +27,16 @@ export type EditorTab = {
   id: string;
   document: FileDocument;
   content: string;
+  csvViewMode: CsvViewMode;
   lastSavedContent: string;
 };
 
 export type ThemeMode = "dark" | "light" | "system";
+export type CsvViewMode = "table" | "raw";
+
+export type EditorSettings = {
+  showLineNumbers: boolean;
+  wordWrap: boolean;
+  fontSize: number;
+  tabSize: number;
+};

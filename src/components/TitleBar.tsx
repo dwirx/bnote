@@ -1,11 +1,15 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  ClipboardCopy,
   FileText,
+  Info,
   Maximize2,
   Minus,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
+  RefreshCw,
+  RotateCcw,
   Settings2,
   Sun,
   X,
@@ -13,9 +17,12 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -31,11 +38,21 @@ export function TitleBar() {
   const tabs = useAppStore((state) => state.tabs);
   const sidebarCollapsed = useAppStore((state) => state.sidebarCollapsed);
   const themeMode = useAppStore((state) => state.themeMode);
+  const editorSettings = useAppStore((state) => state.editorSettings);
   const toggleSidebar = useAppStore((state) => state.toggleSidebar);
   const setThemeMode = useAppStore((state) => state.setThemeMode);
+  const setEditorFontSize = useAppStore((state) => state.setEditorFontSize);
+  const setEditorTabSize = useAppStore((state) => state.setEditorTabSize);
+  const setShowLineNumbers = useAppStore((state) => state.setShowLineNumbers);
+  const setWordWrap = useAppStore((state) => state.setWordWrap);
   const openFromDialog = useAppStore((state) => state.openFromDialog);
   const saveActiveTab = useAppStore((state) => state.saveActiveTab);
   const saveActiveTabAs = useAppStore((state) => state.saveActiveTabAs);
+  const copyActiveFileInfo = useAppStore((state) => state.copyActiveFileInfo);
+  const copyActivePath = useAppStore((state) => state.copyActivePath);
+  const showSystemInfo = useAppStore((state) => state.showSystemInfo);
+  const checkForUpdates = useAppStore((state) => state.checkForUpdates);
+  const relaunchApp = useAppStore((state) => state.relaunchApp);
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const activeDirty = isDirty(activeTab);
   const appWindow = getCurrentWindow();
@@ -117,6 +134,68 @@ export function TitleBar() {
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => void toggleSidebar()}>
               {sidebarCollapsed ? "Show Sidebar" : "Hide Sidebar"}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Clipboard</DropdownMenuLabel>
+            <DropdownMenuItem disabled={!activeTab} onClick={() => void copyActivePath()}>
+              <ClipboardCopy className="size-3.5" />
+              Copy Path
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!activeTab} onClick={() => void copyActiveFileInfo()}>
+              <ClipboardCopy className="size-3.5" />
+              Copy File Info
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Editor</DropdownMenuLabel>
+            <DropdownMenuCheckboxItem
+              checked={editorSettings.showLineNumbers}
+              onCheckedChange={(checked) => void setShowLineNumbers(Boolean(checked))}
+            >
+              Line numbers
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={editorSettings.wordWrap}
+              onCheckedChange={(checked) => void setWordWrap(Boolean(checked))}
+            >
+              Word wrap
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Font size</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={String(editorSettings.fontSize)}
+              onValueChange={(value) => void setEditorFontSize(Number(value))}
+            >
+              {[12, 13, 14, 16, 18].map((size) => (
+                <DropdownMenuRadioItem key={size} value={String(size)}>
+                  {size}px
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Tab size</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={String(editorSettings.tabSize)}
+              onValueChange={(value) => void setEditorTabSize(Number(value))}
+            >
+              {[2, 4, 8].map((size) => (
+                <DropdownMenuRadioItem key={size} value={String(size)}>
+                  {size} spaces
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>System</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => void showSystemInfo()}>
+              <Info className="size-3.5" />
+              System Info
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void checkForUpdates()}>
+              <RefreshCw className="size-3.5" />
+              Check Updates
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void relaunchApp()}>
+              <RotateCcw className="size-3.5" />
+              Restart BNote
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
