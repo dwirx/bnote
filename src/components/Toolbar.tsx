@@ -1,5 +1,5 @@
 import type React from "react";
-import { ExternalLink, FolderOpen, PanelLeft, Save, SaveAll } from "lucide-react";
+import { ExternalLink, Folder, FolderOpen, PanelLeft, Save, SaveAll } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAppStore } from "@/stores/useAppStore";
@@ -39,6 +39,7 @@ export function Toolbar() {
   const tabs = useAppStore((state) => state.tabs);
   const isBusy = useAppStore((state) => state.isBusy);
   const openFromDialog = useAppStore((state) => state.openFromDialog);
+  const openFolderFromDialog = useAppStore((state) => state.openFolderFromDialog);
   const saveActiveTab = useAppStore((state) => state.saveActiveTab);
   const saveActiveTabAs = useAppStore((state) => state.saveActiveTabAs);
   const openActiveExternally = useAppStore((state) => state.openActiveExternally);
@@ -51,6 +52,9 @@ export function Toolbar() {
       <div className="flex items-center gap-1">
         <ToolButton label="Open file (Ctrl+O)" disabled={isBusy} onClick={() => void openFromDialog()}>
           <FolderOpen />
+        </ToolButton>
+        <ToolButton label="Open folder (Ctrl+Shift+O)" disabled={isBusy} onClick={() => void openFolderFromDialog()}>
+          <Folder />
         </ToolButton>
         <ToolButton
           label="Save (Ctrl+S)"

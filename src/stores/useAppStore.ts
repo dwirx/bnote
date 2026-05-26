@@ -7,7 +7,16 @@ import { arch, platform, type as osType, version } from "@tauri-apps/plugin-os";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { Store } from "@tauri-apps/plugin-store";
 import { create } from "zustand";
-import type { CsvViewMode, EditorSettings, EditorTab, FileDocument, FileMetadata, ThemeMode } from "@/types";
+import type {
+  CsvViewMode,
+  EditorSettings,
+  EditorTab,
+  FileDocument,
+  FileMetadata,
+  FolderTree,
+  PathInspection,
+  ThemeMode,
+} from "@/types";
 import {
   EDITOR_SETTINGS_KEY,
   MAX_RECENT_FILES,
@@ -24,8 +33,11 @@ import {
 
 type AppState = {
   activeTabId: string | null;
+  activeFolder: string | null;
   editorSettings: EditorSettings;
   error: string | null;
+  folderTree: FolderTree | null;
+  folderTreeTruncated: boolean;
   isBusy: boolean;
   isDragActive: boolean;
   query: string;
@@ -35,14 +47,19 @@ type AppState = {
   tabs: EditorTab[];
   themeMode: ThemeMode;
   checkForUpdates: () => Promise<void>;
+  clearRecentFiles: () => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
   copyActiveFileInfo: () => Promise<void>;
   copyActivePath: () => Promise<void>;
   hydratePreferences: () => Promise<void>;
   openActiveExternally: () => Promise<void>;
   openFiles: (paths: string[]) => Promise<void>;
+  openFolder: (path: string) => Promise<void>;
+  openFolderFromDialog: () => Promise<void>;
   openFromDialog: () => Promise<void>;
+  openPaths: (paths: string[]) => Promise<void>;
   rememberFile: (path: string) => Promise<void>;
+  refreshFolder: () => Promise<void>;
   revealActiveFile: () => Promise<void>;
   relaunchApp: () => Promise<void>;
   saveActiveTab: () => Promise<boolean>;
@@ -91,8 +108,11 @@ function defaultCsvViewMode(document: FileDocument): CsvViewMode {
 
 export const useAppStore = create<AppState>((set, get) => ({
   activeTabId: null,
+  activeFolder: null,
   editorSettings: defaultEditorSettings,
   error: null,
+  folderTree: null,
+  folderTreeTruncated: false,
   isBusy: false,
   isDragActive: false,
   query: "",
@@ -141,6 +161,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     await persistValue(get().store, RECENT_FILES_KEY, nextRecentFiles);
   },
 
+  clearRecentFiles: async () => {
+    set({ recentFiles: [] });
+    await persistValue(get().store, RECENT_FILES_KEY, []);
+  },
+
   openFiles: async (paths: string[]) => {
     for (const path of paths) {
       const tabId = tabIdForPath(path);
@@ -177,17 +202,80 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  openPaths: async (paths: string[]) => {
+    const filePaths: string[] = [];
+
+    for (const path of paths) {
+      try {
+        const inspected = await invoke<PathInspection>("inspect_path", { path });
+        if (inspected.isDir) {
+          await get().openFolder(inspected.path);
+        } else if (inspected.isFile) {
+          filePaths.push(inspected.path);
+        }
+      } catch (caught) {
+        set({ error: toErrorMessage(caught) });
+      }
+    }
+
+    if (filePaths.length > 0) {
+      await get().openFiles(filePaths);
+    }
+  },
+
   openFromDialog: async () => {
     const selected = await open({
       multiple: true,
       title: "Open files",
       fileAccessMode: "scoped",
+      filters: [
+        {
+          name: "Supported files",
+          extensions: ["txt", "md", "csv", "json", "ts", "js", "pdf", "epub"],
+        },
+      ],
     });
 
     if (Array.isArray(selected)) {
       await get().openFiles(selected);
     } else if (typeof selected === "string") {
       await get().openFiles([selected]);
+    }
+  },
+
+  openFolderFromDialog: async () => {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "Open folder",
+      fileAccessMode: "scoped",
+    });
+
+    if (typeof selected === "string") {
+      await get().openFolder(selected);
+    }
+  },
+
+  openFolder: async (path: string) => {
+    set({ error: null, isBusy: true });
+    try {
+      const folderTree = await invoke<FolderTree>("list_folder", { path });
+      set({
+        activeFolder: folderTree.root.path,
+        folderTree,
+        folderTreeTruncated: folderTree.truncated,
+      });
+    } catch (caught) {
+      set({ error: toErrorMessage(caught) });
+    } finally {
+      set({ isBusy: false });
+    }
+  },
+
+  refreshFolder: async () => {
+    const activeFolder = get().activeFolder;
+    if (activeFolder) {
+      await get().openFolder(activeFolder);
     }
   },
 

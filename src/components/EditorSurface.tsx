@@ -1,9 +1,21 @@
+import { lazy, Suspense } from "react";
 import { AlertTriangle, ExternalLink, FolderOpen, Info, PanelLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CodeEditor } from "@/components/CodeEditor";
 import { CsvPreview } from "@/components/CsvPreview";
 import { useAppStore } from "@/stores/useAppStore";
 import { formatBytes, formatDate } from "@/utils/files";
+
+const PdfViewer = lazy(() => import("@/components/PdfViewer").then((module) => ({ default: module.PdfViewer })));
+const EpubViewer = lazy(() => import("@/components/EpubViewer").then((module) => ({ default: module.EpubViewer })));
+
+function ViewerLoading() {
+  return (
+    <div className="grid h-full place-items-center rounded-lg border border-border bg-editor text-sm text-muted-foreground">
+      Loading viewer
+    </div>
+  );
+}
 
 export function EditorSurface() {
   const activeTabId = useAppStore((state) => state.activeTabId);
@@ -46,7 +58,7 @@ export function EditorSurface() {
             <div className="space-y-2">
               <h2 className="text-lg font-semibold text-foreground">No File Open</h2>
               <p className="text-sm leading-6 text-muted-foreground">
-                Open or drop a local text, CSV, code, or binary file. Huge files open in preview mode.
+                Open or drop text, CSV, code, PDF, EPUB, or folders. Huge text files open in preview mode.
               </p>
             </div>
             <Button disabled={isBusy} onClick={() => void openFromDialog()}>
@@ -55,6 +67,14 @@ export function EditorSurface() {
             </Button>
           </div>
         </div>
+      ) : document.kind === "pdf" ? (
+        <Suspense fallback={<ViewerLoading />}>
+          <PdfViewer document={document} onOpenExternal={() => void openActiveExternally()} />
+        </Suspense>
+      ) : document.kind === "epub" ? (
+        <Suspense fallback={<ViewerLoading />}>
+          <EpubViewer document={document} onOpenExternal={() => void openActiveExternally()} />
+        </Suspense>
       ) : document.kind === "binary" ? (
         <div className="grid place-items-center rounded-lg border border-border bg-editor p-6">
           <div className="flex max-w-xl flex-col items-center gap-4 text-center">

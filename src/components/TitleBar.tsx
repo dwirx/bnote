@@ -1,6 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ClipboardCopy,
+  Folder,
   FileText,
   Info,
   Maximize2,
@@ -46,6 +47,7 @@ export function TitleBar() {
   const setShowLineNumbers = useAppStore((state) => state.setShowLineNumbers);
   const setWordWrap = useAppStore((state) => state.setWordWrap);
   const openFromDialog = useAppStore((state) => state.openFromDialog);
+  const openFolderFromDialog = useAppStore((state) => state.openFolderFromDialog);
   const saveActiveTab = useAppStore((state) => state.saveActiveTab);
   const saveActiveTabAs = useAppStore((state) => state.saveActiveTabAs);
   const copyActiveFileInfo = useAppStore((state) => state.copyActiveFileInfo);
@@ -127,6 +129,10 @@ export function TitleBar() {
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>File</DropdownMenuLabel>
             <DropdownMenuItem onClick={() => void openFromDialog()}>Open</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void openFolderFromDialog()}>
+              <Folder className="size-3.5" />
+              Open Folder
+            </DropdownMenuItem>
             <DropdownMenuItem disabled={!activeTab || !activeDirty} onClick={() => void saveActiveTab()}>
               Save
             </DropdownMenuItem>

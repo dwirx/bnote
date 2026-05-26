@@ -19,10 +19,11 @@ function resolveThemeMode(themeMode: ThemeMode, systemDark: boolean) {
 
 function App() {
   const hydratePreferences = useAppStore((state) => state.hydratePreferences);
-  const openFiles = useAppStore((state) => state.openFiles);
+  const openPaths = useAppStore((state) => state.openPaths);
   const saveActiveTab = useAppStore((state) => state.saveActiveTab);
   const saveActiveTabAs = useAppStore((state) => state.saveActiveTabAs);
   const openFromDialog = useAppStore((state) => state.openFromDialog);
+  const openFolderFromDialog = useAppStore((state) => state.openFolderFromDialog);
   const closeTab = useAppStore((state) => state.closeTab);
   const toggleSidebar = useAppStore((state) => state.toggleSidebar);
   const setDragActive = useAppStore((state) => state.setDragActive);
@@ -69,7 +70,7 @@ function App() {
 
         if (event.payload.type === "drop") {
           setDragActive(false);
-          void openFiles(event.payload.paths);
+          void openPaths(event.payload.paths);
         }
       })
       .then((listener) => {
@@ -82,7 +83,7 @@ function App() {
     return () => {
       unlisten?.();
     };
-  }, [openFiles, setDragActive]);
+  }, [openPaths, setDragActive]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -109,7 +110,11 @@ function App() {
 
       if (commandKey && key === "o") {
         event.preventDefault();
-        void openFromDialog();
+        if (event.shiftKey) {
+          void openFolderFromDialog();
+        } else {
+          void openFromDialog();
+        }
         return;
       }
 
@@ -121,7 +126,15 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeTabId, closeTab, openFromDialog, saveActiveTab, saveActiveTabAs, toggleSidebar]);
+  }, [
+    activeTabId,
+    closeTab,
+    openFolderFromDialog,
+    openFromDialog,
+    saveActiveTab,
+    saveActiveTabAs,
+    toggleSidebar,
+  ]);
 
   return (
     <TooltipProvider delayDuration={250}>

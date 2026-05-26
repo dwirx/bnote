@@ -6,6 +6,12 @@
 
 - Added a CodeMirror-powered editor with syntax highlighting for common text and code formats.
 - Added CSV table preview with a raw text fallback view.
+- Added native Rust-backed PDF and EPUB readers.
+- Added scrollable multi-page PDF rendering with lazy Pdfium page rasterization, page jump, zoom, fit width, and clickable bookmark/page navigation.
+- Added native EPUB parsing with metadata, TOC, spine navigation, scrollable chapter reading, font controls, and inlined EPUB image/CSS resources.
+- Bundled Windows x64 `pdfium.dll` for release builds.
+- Added folder opening with a limited workspace tree in the sidebar.
+- Added a clear recent action for the recent files list.
 - Added editor preferences for line numbers, word wrap, font size, and tab size.
 - Added clipboard actions for copying the active file path and file details.
 - Added system info, restart, and updater status actions in the app menu.

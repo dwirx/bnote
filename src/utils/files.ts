@@ -91,6 +91,8 @@ export function getLanguageLabel(document: FileDocument | null | undefined) {
   if (document?.kind === "largeText") return "Large text preview";
   if (document?.kind === "binary") return "Binary";
   if (document?.kind === "csv") return "CSV";
+  if (document?.kind === "pdf") return "PDF";
+  if (document?.kind === "epub") return "EPUB";
   if (!document?.extension) return "Plain text";
   const ext = document.extension.toLowerCase();
   if (ext === "md" || ext === "mdx") return "Markdown";
