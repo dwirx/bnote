@@ -1,6 +1,6 @@
 import { AlertTriangle, Check } from "lucide-react";
 import { useAppStore } from "@/stores/useAppStore";
-import { countWords, formatBytes, getLanguageLabel, isDirty, lineCount, shortPath } from "@/utils/files";
+import { countWords, formatBytes, getLanguageLabel, isDirty, isUntitledDocument, lineCount, shortPath } from "@/utils/files";
 
 export function StatusBar() {
   const activeTabId = useAppStore((state) => state.activeTabId);
@@ -20,7 +20,9 @@ export function StatusBar() {
         </span>
         <span>{document ? getLanguageLabel(document) : "Ready"}</span>
         <span>{document ? formatBytes(document.size) : "0 B"}</span>
-        <span className="truncate">{document ? shortPath(document.path) : ""}</span>
+        <span className="truncate">
+          {document ? (isUntitledDocument(document) ? document.name : shortPath(document.path)) : ""}
+        </span>
       </div>
       <div className="flex shrink-0 items-center gap-3">
         {document && document.content !== null ? (

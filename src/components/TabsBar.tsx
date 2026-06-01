@@ -9,20 +9,22 @@ export function TabsBar() {
   const activeTabId = useAppStore((state) => state.activeTabId);
   const tabs = useAppStore((state) => state.tabs);
   const closeTab = useAppStore((state) => state.closeTab);
-  const openFromDialog = useAppStore((state) => state.openFromDialog);
+  const createNewFile = useAppStore((state) => state.createNewFile);
+  const sidebarCollapsed = useAppStore((state) => state.sidebarCollapsed);
   const setActiveTab = useAppStore((state) => state.setActiveTab);
+  const zenMode = useAppStore((state) => state.zenMode);
 
   return (
-    <div className="grid h-9 grid-cols-[minmax(0,1fr)_auto] items-end border-b border-border bg-muted/40">
+    <div className="grid h-[38px] grid-cols-[minmax(0,1fr)_auto] items-end border-b border-border bg-muted/35">
       <ScrollArea className="min-w-0 whitespace-nowrap">
-        <div className="flex h-9 items-end gap-1 px-2">
+        <div className="flex h-[38px] items-end gap-1 px-2">
           {tabs.map((tab) => {
             const active = tab.id === activeTabId;
             const dirty = isDirty(tab);
             return (
               <div
                 className={cn(
-                  "grid h-8 min-w-36 max-w-60 grid-cols-[minmax(0,1fr)_24px] items-center rounded-t-md border border-transparent border-b-0",
+                  "grid h-8 min-w-36 max-w-60 grid-cols-[minmax(0,1fr)_24px] items-center rounded-t-md border border-transparent border-b-0 transition-colors",
                   active
                     ? "border-border bg-editor text-foreground"
                     : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
@@ -55,9 +57,17 @@ export function TabsBar() {
         </div>
         <ScrollBar orientation="horizontal" />
       </ScrollArea>
-      <Button size="icon" variant="ghost" className="mb-1 mr-2 h-7 w-7" onClick={() => void openFromDialog()}>
-        <Plus className="size-4" />
-      </Button>
+      {sidebarCollapsed || zenMode ? (
+        <Button
+          size="icon"
+          variant="ghost"
+          className="mb-1 mr-2 h-7 w-7 text-muted-foreground hover:text-foreground"
+          title="New file"
+          onClick={createNewFile}
+        >
+          <Plus className="size-4" />
+        </Button>
+      ) : null}
     </div>
   );
 }

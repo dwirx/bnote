@@ -1,17 +1,21 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ClipboardCopy,
+  FilePlus2,
   Folder,
   FileText,
+  Focus,
   Info,
+  ListTree,
   Maximize2,
+  Menu,
   Minus,
+  Monitor,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
   RotateCcw,
-  Settings2,
   Sun,
   X,
 } from "lucide-react";
@@ -32,15 +36,20 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAppStore } from "@/stores/useAppStore";
 import type { ThemeMode } from "@/types";
-import { isDirty } from "@/utils/files";
+import { isDirty, isFilesystemDocument, isUntitledDocument } from "@/utils/files";
 
 export function TitleBar() {
   const activeTabId = useAppStore((state) => state.activeTabId);
+  const documentOutlineCollapsed = useAppStore((state) => state.documentOutlineCollapsed);
   const tabs = useAppStore((state) => state.tabs);
   const sidebarCollapsed = useAppStore((state) => state.sidebarCollapsed);
   const themeMode = useAppStore((state) => state.themeMode);
   const editorSettings = useAppStore((state) => state.editorSettings);
+  const zenMode = useAppStore((state) => state.zenMode);
+  const createNewFile = useAppStore((state) => state.createNewFile);
+  const toggleDocumentOutline = useAppStore((state) => state.toggleDocumentOutline);
   const toggleSidebar = useAppStore((state) => state.toggleSidebar);
+  const toggleZenMode = useAppStore((state) => state.toggleZenMode);
   const setThemeMode = useAppStore((state) => state.setThemeMode);
   const setEditorFontSize = useAppStore((state) => state.setEditorFontSize);
   const setEditorTabSize = useAppStore((state) => state.setEditorTabSize);
@@ -57,6 +66,9 @@ export function TitleBar() {
   const relaunchApp = useAppStore((state) => state.relaunchApp);
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const activeDirty = isDirty(activeTab);
+  const activeUntitled = isUntitledDocument(activeTab?.document);
+  const canSave = Boolean(activeTab?.document.editable && (activeDirty || activeUntitled));
+  const hasDocumentOutline = activeTab?.document.kind === "pdf" || activeTab?.document.kind === "epub";
   const appWindow = getCurrentWindow();
 
   const setMode = (mode: string) => {
@@ -66,7 +78,7 @@ export function TitleBar() {
   };
 
   return (
-    <header className="grid h-10 grid-cols-[auto_minmax(0,1fr)_auto] items-center border-b border-border bg-titlebar text-titlebar-foreground">
+    <header className="grid h-10 grid-cols-[auto_minmax(0,1fr)_auto] items-center border-b border-border bg-titlebar text-titlebar-foreground shadow-[0_1px_0_color-mix(in_srgb,var(--foreground)_5%,transparent)]">
       <div className="flex h-full items-center gap-2 pl-2">
         <Tooltip>
           <TooltipTrigger asChild>
@@ -82,10 +94,15 @@ export function TitleBar() {
           <TooltipContent>{sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}</TooltipContent>
         </Tooltip>
         <div className="flex items-center gap-2 font-semibold">
-          <div className="grid size-6 place-items-center rounded bg-primary text-xs text-primary-foreground">
+          <div className="grid size-6 place-items-center rounded-md bg-primary text-xs text-primary-foreground shadow-sm">
             B
           </div>
-          <span className="text-xs tracking-wide text-muted-foreground">BNOTE</span>
+          <span className="text-xs tracking-wide text-foreground">BNOTE</span>
+          {zenMode ? (
+            <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+              ZEN
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -104,15 +121,20 @@ export function TitleBar() {
         </span>
       </div>
 
-      <div className="flex h-full items-center">
-        <ToggleGroup type="single" value={themeMode} onValueChange={setMode} className="mr-2 h-7">
+      <div className="flex h-full items-center pr-1">
+        <ToggleGroup
+          type="single"
+          value={themeMode}
+          onValueChange={setMode}
+          className="mr-1 h-7 rounded-md border border-border bg-muted/35 p-0.5"
+        >
           {(["dark", "light", "system"] satisfies ThemeMode[]).map((mode) => (
             <Tooltip key={mode}>
               <TooltipTrigger asChild>
-                <ToggleGroupItem value={mode} className="h-6 min-w-7 px-1.5">
+                <ToggleGroupItem value={mode} className="h-6 min-w-7 rounded px-1.5">
                   {mode === "dark" ? <Moon className="size-3.5" /> : null}
                   {mode === "light" ? <Sun className="size-3.5" /> : null}
-                  {mode === "system" ? <Settings2 className="size-3.5" /> : null}
+                  {mode === "system" ? <Monitor className="size-3.5" /> : null}
                 </ToggleGroupItem>
               </TooltipTrigger>
               <TooltipContent>{mode[0].toUpperCase() + mode.slice(1)} theme</TooltipContent>
@@ -120,30 +142,71 @@ export function TitleBar() {
           ))}
         </ToggleGroup>
 
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="mr-1 h-8 w-8 text-muted-foreground hover:text-foreground"
+              onClick={createNewFile}
+            >
+              <FilePlus2 />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>New file (Ctrl+N)</TooltipContent>
+        </Tooltip>
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="icon" variant="ghost" className="mr-2 h-8 w-8 text-muted-foreground">
-              <Settings2 />
+            <Button size="icon" variant="ghost" className="mr-2 h-8 w-8 text-muted-foreground hover:text-foreground">
+              <Menu />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="end" className="w-64">
             <DropdownMenuLabel>File</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => void openFromDialog()}>Open</DropdownMenuItem>
+            <DropdownMenuItem onClick={createNewFile}>
+              <FilePlus2 className="size-3.5" />
+              New File
+              <span className="ml-auto text-xs text-muted-foreground">Ctrl+N</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void openFromDialog()}>
+              <FileText className="size-3.5" />
+              Open
+              <span className="ml-auto text-xs text-muted-foreground">Ctrl+O</span>
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => void openFolderFromDialog()}>
               <Folder className="size-3.5" />
               Open Folder
+              <span className="ml-auto text-xs text-muted-foreground">Ctrl+Shift+O</span>
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={!activeTab || !activeDirty} onClick={() => void saveActiveTab()}>
+            <DropdownMenuItem disabled={!canSave} onClick={() => void saveActiveTab()}>
               Save
+              <span className="ml-auto text-xs text-muted-foreground">Ctrl+S</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => void saveActiveTabAs()}>Save As</DropdownMenuItem>
+            <DropdownMenuItem disabled={!activeTab} onClick={() => void saveActiveTabAs()}>
+              Save As
+              <span className="ml-auto text-xs text-muted-foreground">Ctrl+Shift+S</span>
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
+            <DropdownMenuLabel>View</DropdownMenuLabel>
             <DropdownMenuItem onClick={() => void toggleSidebar()}>
-              {sidebarCollapsed ? "Show Sidebar" : "Hide Sidebar"}
+              {sidebarCollapsed ? <PanelLeftOpen className="size-3.5" /> : <PanelLeftClose className="size-3.5" />}
+              {sidebarCollapsed ? "Show Workspace" : "Hide Workspace"}
+              <span className="ml-auto text-xs text-muted-foreground">Ctrl+B</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!hasDocumentOutline} onClick={() => void toggleDocumentOutline()}>
+              <ListTree className="size-3.5" />
+              {documentOutlineCollapsed ? "Show Chapters" : "Hide Chapters"}
+              <span className="ml-auto text-xs text-muted-foreground">Ctrl+Alt+B</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void toggleZenMode()}>
+              <Focus className="size-3.5" />
+              {zenMode ? "Exit Zen" : "Enter Zen"}
+              <span className="ml-auto text-xs text-muted-foreground">F11</span>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuLabel>Clipboard</DropdownMenuLabel>
-            <DropdownMenuItem disabled={!activeTab} onClick={() => void copyActivePath()}>
+            <DropdownMenuItem disabled={!isFilesystemDocument(activeTab?.document)} onClick={() => void copyActivePath()}>
               <ClipboardCopy className="size-3.5" />
               Copy Path
             </DropdownMenuItem>

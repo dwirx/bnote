@@ -1,10 +1,12 @@
 import type { EditorTab, FileDocument } from "../types";
 
 export const EDITOR_SETTINGS_KEY = "editorSettings";
+export const DOCUMENT_OUTLINE_COLLAPSED_KEY = "documentOutlineCollapsed";
 export const RECENT_FILES_KEY = "recentFiles";
 export const SIDEBAR_COLLAPSED_KEY = "sidebarCollapsed";
 export const STORE_FILE = "settings.json";
 export const THEME_MODE_KEY = "themeMode";
+export const ZEN_MODE_KEY = "zenMode";
 export const MAX_RECENT_FILES = 12;
 
 const textFileExtensions = new Set([
@@ -44,6 +46,18 @@ const textFileExtensions = new Set([
 
 export function tabIdForPath(path: string) {
   return `file:${path}`;
+}
+
+export function untitledPathForId(id: string) {
+  return `untitled:${id}`;
+}
+
+export function isUntitledDocument(document: FileDocument | null | undefined) {
+  return Boolean(document?.path.startsWith("untitled:"));
+}
+
+export function isFilesystemDocument(document: FileDocument | null | undefined) {
+  return Boolean(document && !isUntitledDocument(document));
 }
 
 export function isDirty(tab: EditorTab | null | undefined) {
@@ -88,6 +102,7 @@ export function countWords(content: string) {
 }
 
 export function getLanguageLabel(document: FileDocument | null | undefined) {
+  if (isUntitledDocument(document)) return "New file";
   if (document?.kind === "largeText") return "Large text preview";
   if (document?.kind === "binary") return "Binary";
   if (document?.kind === "csv") return "CSV";

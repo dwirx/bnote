@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import {
   BookOpen,
   ChevronLeft,
@@ -8,9 +8,12 @@ import {
   Loader2,
   Maximize,
   Minus,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAppStore } from "@/stores/useAppStore";
 import type { FileDocument, PdfInfo, PdfPageInfo, PdfPageRender, TocNode } from "@/types";
 import { formatBytes } from "@/utils/files";
 
@@ -23,6 +26,8 @@ type PageImageState =
   | { status: "loading"; targetWidth: number }
   | { status: "ready"; targetWidth: number; image: PdfPageRender }
   | { status: "error"; targetWidth: number; message: string };
+
+type PdfRenderMode = "native" | "webview";
 
 function renderKey(pageIndex: number, targetWidth: number) {
   return `${pageIndex}:${targetWidth}`;
@@ -74,6 +79,8 @@ function PdfTocTree({
 }
 
 export function PdfViewer({ document, onOpenExternal }: PdfViewerProps) {
+  const documentOutlineCollapsed = useAppStore((state) => state.documentOutlineCollapsed);
+  const toggleDocumentOutline = useAppStore((state) => state.toggleDocumentOutline);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pageRefs = useRef<Record<number, HTMLElement | null>>({});
   const requestedRef = useRef<Set<string>>(new Set());
@@ -86,6 +93,8 @@ export function PdfViewer({ document, onOpenExternal }: PdfViewerProps) {
   const [fitWidth, setFitWidth] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [renderMode, setRenderMode] = useState<PdfRenderMode>("native");
+  const webviewSrc = useMemo(() => convertFileSrc(document.path), [document.path]);
 
   const targetWidth = useMemo(() => {
     if (fitWidth) {
@@ -100,6 +109,7 @@ export function PdfViewer({ document, onOpenExternal }: PdfViewerProps) {
     let cancelled = false;
     setIsLoading(true);
     setError(null);
+    setRenderMode("native");
     setInfo(null);
     setPageImages({});
     requestedRef.current.clear();
@@ -111,7 +121,10 @@ export function PdfViewer({ document, onOpenExternal }: PdfViewerProps) {
         if (!cancelled) setInfo(nextInfo);
       })
       .catch((caught) => {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : String(caught));
+          setRenderMode("webview");
+        }
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -162,12 +175,15 @@ export function PdfViewer({ document, onOpenExternal }: PdfViewerProps) {
           }));
         })
         .catch((caught) => {
+          const message = caught instanceof Error ? caught.message : String(caught);
+          setError(message);
+          setRenderMode("webview");
           setPageImages((current) => ({
             ...current,
             [key]: {
               status: "error",
               targetWidth,
-              message: caught instanceof Error ? caught.message : String(caught),
+              message,
             },
           }));
         });
@@ -239,7 +255,8 @@ export function PdfViewer({ document, onOpenExternal }: PdfViewerProps) {
   };
 
   const pageCount = info?.pageCount ?? 0;
-  const canRead = Boolean(info && !error);
+  const canRead = renderMode === "native" && Boolean(info && !error);
+  const usingWebviewFallback = renderMode === "webview";
 
   return (
     <div className="grid min-h-0 grid-rows-[42px_minmax(0,1fr)] rounded-lg border border-border bg-editor">
@@ -249,33 +266,50 @@ export function PdfViewer({ document, onOpenExternal }: PdfViewerProps) {
             size="icon"
             variant="ghost"
             className="h-8 w-8"
-            disabled={!canRead || activePage <= 0}
-            onClick={() => jumpToPage(Math.max(0, activePage - 1))}
-            title="Previous page"
+            onClick={() => void toggleDocumentOutline()}
+            title={documentOutlineCollapsed ? "Show contents" : "Hide contents"}
           >
-            <ChevronLeft className="size-4" />
+            {documentOutlineCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
           </Button>
-          <input
-            className="h-7 w-14 rounded-md border border-border bg-background px-2 text-center text-xs text-foreground outline-none focus:border-ring"
-            value={pageInput}
-            disabled={!canRead}
-            onBlur={commitPageInput}
-            onChange={(event) => setPageInput(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") commitPageInput();
-            }}
-          />
-          <span className="text-xs text-muted-foreground">/ {pageCount || "-"}</span>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-8 w-8"
-            disabled={!canRead || activePage >= pageCount - 1}
-            onClick={() => jumpToPage(Math.min(pageCount - 1, activePage + 1))}
-            title="Next page"
-          >
-            <ChevronRight className="size-4" />
-          </Button>
+          {usingWebviewFallback ? (
+            <span className="rounded border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-500">
+              WebView fallback
+            </span>
+          ) : (
+            <>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                disabled={!canRead || activePage <= 0}
+                onClick={() => jumpToPage(Math.max(0, activePage - 1))}
+                title="Previous page"
+              >
+                <ChevronLeft className="size-4" />
+              </Button>
+              <input
+                className="h-7 w-14 rounded-md border border-border bg-background px-2 text-center text-xs text-foreground outline-none focus:border-ring"
+                value={pageInput}
+                disabled={!canRead}
+                onBlur={commitPageInput}
+                onChange={(event) => setPageInput(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") commitPageInput();
+                }}
+              />
+              <span className="text-xs text-muted-foreground">/ {pageCount || "-"}</span>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                disabled={!canRead || activePage >= pageCount - 1}
+                onClick={() => jumpToPage(Math.min(pageCount - 1, activePage + 1))}
+                title="Next page"
+              >
+                <ChevronRight className="size-4" />
+              </Button>
+            </>
+          )}
           {isLoading ? <Loader2 className="size-3.5 animate-spin text-muted-foreground" /> : null}
         </div>
 
@@ -283,38 +317,42 @@ export function PdfViewer({ document, onOpenExternal }: PdfViewerProps) {
           <span className="mr-2 hidden truncate text-xs text-muted-foreground md:inline">
             {document.name} · {formatBytes(document.size)}
           </span>
-          <Button size="icon" variant="ghost" className="h-8 w-8" disabled={!canRead} onClick={() => setFitWidth(true)} title="Fit width">
-            <Maximize className="size-4" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-8 w-8"
-            disabled={!canRead}
-            onClick={() => {
-              setFitWidth(false);
-              setZoom((value) => Math.max(0.5, value - 0.15));
-            }}
-            title="Zoom out"
-          >
-            <Minus className="size-4" />
-          </Button>
-          <span className="hidden w-12 text-center text-xs text-muted-foreground sm:inline">
-            {fitWidth ? "Fit" : `${Math.round(zoom * 100)}%`}
-          </span>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-8 w-8"
-            disabled={!canRead}
-            onClick={() => {
-              setFitWidth(false);
-              setZoom((value) => Math.min(2.6, value + 0.15));
-            }}
-            title="Zoom in"
-          >
-            <Plus className="size-4" />
-          </Button>
+          {usingWebviewFallback ? null : (
+            <>
+              <Button size="icon" variant="ghost" className="h-8 w-8" disabled={!canRead} onClick={() => setFitWidth(true)} title="Fit width">
+                <Maximize className="size-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                disabled={!canRead}
+                onClick={() => {
+                  setFitWidth(false);
+                  setZoom((value) => Math.max(0.5, value - 0.15));
+                }}
+                title="Zoom out"
+              >
+                <Minus className="size-4" />
+              </Button>
+              <span className="hidden w-12 text-center text-xs text-muted-foreground sm:inline">
+                {fitWidth ? "Fit" : `${Math.round(zoom * 100)}%`}
+              </span>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                disabled={!canRead}
+                onClick={() => {
+                  setFitWidth(false);
+                  setZoom((value) => Math.min(2.6, value + 0.15));
+                }}
+                title="Zoom in"
+              >
+                <Plus className="size-4" />
+              </Button>
+            </>
+          )}
           <Button size="sm" variant="outline" className="h-8" onClick={onOpenExternal}>
             <ExternalLink className="size-3.5" />
             External
@@ -322,13 +360,23 @@ export function PdfViewer({ document, onOpenExternal }: PdfViewerProps) {
         </div>
       </div>
 
-      <div className="grid min-h-0 grid-cols-[230px_minmax(0,1fr)] bg-background/60">
-        <aside className="min-h-0 overflow-auto border-r border-border bg-sidebar/70 p-2">
+      <div
+        className="grid min-h-0 bg-background/60"
+        style={{ gridTemplateColumns: documentOutlineCollapsed ? "0 minmax(0,1fr)" : "230px minmax(0,1fr)" }}
+      >
+        <aside className="min-h-0 overflow-hidden border-r border-border bg-sidebar/70">
+          <div className="h-full overflow-auto p-2">
           <div className="mb-2 flex items-center gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-sidebar-muted">
             <BookOpen className="size-3.5" />
             Contents
           </div>
-          {tocItems.length > 0 ? (
+          {usingWebviewFallback ? (
+            <div className="space-y-2 rounded-md border border-amber-500/20 bg-amber-500/10 p-2 text-xs leading-5 text-sidebar-muted">
+              <p className="font-medium text-sidebar-foreground">Native PDFium could not render this PDF.</p>
+              <p>Using the Windows WebView2 PDF viewer instead.</p>
+              {error ? <p className="break-words text-[11px]">{error}</p> : null}
+            </div>
+          ) : tocItems.length > 0 ? (
             <PdfTocTree nodes={info?.toc ?? []} activePage={activePage} onJump={jumpToPage} />
           ) : info ? (
             <div className="space-y-1">
@@ -351,10 +399,17 @@ export function PdfViewer({ document, onOpenExternal }: PdfViewerProps) {
               {isLoading ? "Loading contents" : "No document contents"}
             </p>
           )}
+          </div>
         </aside>
 
         <div ref={scrollRef} className="min-h-0 overflow-auto bg-muted/45 p-4">
-          {isLoading ? (
+          {usingWebviewFallback ? (
+            <iframe
+              className="h-full w-full border-0 bg-white"
+              src={webviewSrc}
+              title={document.name}
+            />
+          ) : isLoading ? (
             <div className="grid h-full place-items-center text-sm text-muted-foreground">
               <span className="inline-flex items-center gap-2">
                 <Loader2 className="size-4 animate-spin" />

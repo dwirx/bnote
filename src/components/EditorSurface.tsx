@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { AlertTriangle, ExternalLink, FolderOpen, Info, PanelLeft } from "lucide-react";
+import { AlertTriangle, ExternalLink, FilePlus2, FolderOpen, Info, PanelLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CodeEditor } from "@/components/CodeEditor";
 import { CsvPreview } from "@/components/CsvPreview";
@@ -24,6 +24,7 @@ export function EditorSurface() {
   const isDragActive = useAppStore((state) => state.isDragActive);
   const editorSettings = useAppStore((state) => state.editorSettings);
   const tabs = useAppStore((state) => state.tabs);
+  const createNewFile = useAppStore((state) => state.createNewFile);
   const openActiveExternally = useAppStore((state) => state.openActiveExternally);
   const openFromDialog = useAppStore((state) => state.openFromDialog);
   const revealActiveFile = useAppStore((state) => state.revealActiveFile);
@@ -61,10 +62,16 @@ export function EditorSurface() {
                 Open or drop text, CSV, code, PDF, EPUB, or folders. Huge text files open in preview mode.
               </p>
             </div>
-            <Button disabled={isBusy} onClick={() => void openFromDialog()}>
-              <FolderOpen className="size-4" />
-              Open File
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button onClick={createNewFile}>
+                <FilePlus2 className="size-4" />
+                New File
+              </Button>
+              <Button variant="outline" disabled={isBusy} onClick={() => void openFromDialog()}>
+                <FolderOpen className="size-4" />
+                Open File
+              </Button>
+            </div>
           </div>
         </div>
       ) : document.kind === "pdf" ? (

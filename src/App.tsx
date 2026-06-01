@@ -5,7 +5,6 @@ import { Sidebar } from "@/components/Sidebar";
 import { StatusBar } from "@/components/StatusBar";
 import { TabsBar } from "@/components/TabsBar";
 import { TitleBar } from "@/components/TitleBar";
-import { Toolbar } from "@/components/Toolbar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAppStore } from "@/stores/useAppStore";
 import type { ThemeMode } from "@/types";
@@ -19,17 +18,21 @@ function resolveThemeMode(themeMode: ThemeMode, systemDark: boolean) {
 
 function App() {
   const hydratePreferences = useAppStore((state) => state.hydratePreferences);
+  const createNewFile = useAppStore((state) => state.createNewFile);
   const openPaths = useAppStore((state) => state.openPaths);
   const saveActiveTab = useAppStore((state) => state.saveActiveTab);
   const saveActiveTabAs = useAppStore((state) => state.saveActiveTabAs);
   const openFromDialog = useAppStore((state) => state.openFromDialog);
   const openFolderFromDialog = useAppStore((state) => state.openFolderFromDialog);
   const closeTab = useAppStore((state) => state.closeTab);
+  const toggleDocumentOutline = useAppStore((state) => state.toggleDocumentOutline);
   const toggleSidebar = useAppStore((state) => state.toggleSidebar);
+  const toggleZenMode = useAppStore((state) => state.toggleZenMode);
   const setDragActive = useAppStore((state) => state.setDragActive);
   const activeTabId = useAppStore((state) => state.activeTabId);
   const sidebarCollapsed = useAppStore((state) => state.sidebarCollapsed);
   const themeMode = useAppStore((state) => state.themeMode);
+  const zenMode = useAppStore((state) => state.zenMode);
   const [systemDark, setSystemDark] = useState(() =>
     window.matchMedia("(prefers-color-scheme: dark)").matches,
   );
@@ -90,9 +93,33 @@ function App() {
       const key = event.key.toLowerCase();
       const commandKey = event.ctrlKey || event.metaKey;
 
+      if (event.key === "F11") {
+        event.preventDefault();
+        void toggleZenMode();
+        return;
+      }
+
+      if (commandKey && event.altKey && key === "z") {
+        event.preventDefault();
+        void toggleZenMode();
+        return;
+      }
+
+      if (commandKey && event.altKey && key === "b") {
+        event.preventDefault();
+        void toggleDocumentOutline();
+        return;
+      }
+
       if (commandKey && key === "b") {
         event.preventDefault();
         void toggleSidebar();
+        return;
+      }
+
+      if (commandKey && key === "n") {
+        event.preventDefault();
+        createNewFile();
         return;
       }
 
@@ -129,11 +156,14 @@ function App() {
   }, [
     activeTabId,
     closeTab,
+    createNewFile,
     openFolderFromDialog,
     openFromDialog,
     saveActiveTab,
     saveActiveTabAs,
+    toggleDocumentOutline,
     toggleSidebar,
+    toggleZenMode,
   ]);
 
   return (
@@ -148,15 +178,23 @@ function App() {
         <section
           className="grid min-h-0"
           style={{
-            gridTemplateColumns: sidebarCollapsed ? "0 minmax(0, 1fr)" : "256px minmax(0, 1fr)",
+            gridTemplateColumns:
+              sidebarCollapsed || zenMode ? "0 minmax(0, 1fr)" : "256px minmax(0, 1fr)",
           }}
         >
-          <div className="min-h-0 overflow-hidden">{sidebarCollapsed ? null : <Sidebar />}</div>
-          <section className="grid min-h-0 grid-rows-[36px_36px_minmax(0,1fr)_28px]">
-            <Toolbar />
+          <div className="min-h-0 overflow-hidden">
+            {sidebarCollapsed || zenMode ? null : <Sidebar />}
+          </div>
+          <section
+            className={
+              zenMode
+                ? "grid min-h-0 grid-rows-[38px_minmax(0,1fr)]"
+                : "grid min-h-0 grid-rows-[38px_minmax(0,1fr)_28px]"
+            }
+          >
             <TabsBar />
             <EditorSurface />
-            <StatusBar />
+            {zenMode ? null : <StatusBar />}
           </section>
         </section>
       </main>

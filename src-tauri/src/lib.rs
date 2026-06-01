@@ -8,6 +8,7 @@ use std::{
     fs::{self, File},
     io::{Cursor, Read},
     path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
     time::UNIX_EPOCH,
 };
 use tauri::Manager;
@@ -23,6 +24,8 @@ const SUPPORTED_FOLDER_FILE_EXTENSIONS: &[&str] = &[
     "json", "jsx", "log", "lua", "md", "mdx", "pdf", "php", "py", "rs", "sh", "sql", "svelte",
     "toml", "ts", "tsx", "txt", "vue", "xml", "yaml", "yml",
 ];
+static PDFIUM: OnceLock<Pdfium> = OnceLock::new();
+static PDF_DOCUMENT_CACHE: OnceLock<Mutex<Option<CachedPdfDocument>>> = OnceLock::new();
 
 #[derive(Debug)]
 enum AppError {
@@ -58,6 +61,18 @@ struct FileMetadata {
     extension: Option<String>,
     size: u64,
     modified: Option<u64>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct PdfDocumentCacheKey {
+    path: String,
+    size: u64,
+    modified: Option<u64>,
+}
+
+struct CachedPdfDocument {
+    key: PdfDocumentCacheKey,
+    document: PdfDocument<'static>,
 }
 
 #[derive(Serialize)]
@@ -518,7 +533,18 @@ fn pdfium_candidate_paths(resource_dir: Option<PathBuf>) -> Vec<PathBuf> {
     candidates
 }
 
-fn open_pdfium(candidates: &[PathBuf]) -> Result<Pdfium, AppError> {
+fn remember_pdfium(pdfium: Pdfium) -> &'static Pdfium {
+    let _ = PDFIUM.set(pdfium);
+    PDFIUM
+        .get()
+        .expect("PDFium should be initialized before use")
+}
+
+fn pdfium_ref(candidates: &[PathBuf]) -> Result<&'static Pdfium, AppError> {
+    if let Some(pdfium) = PDFIUM.get() {
+        return Ok(pdfium);
+    }
+
     let mut last_error = None;
 
     for candidate in candidates {
@@ -527,21 +553,82 @@ fn open_pdfium(candidates: &[PathBuf]) -> Result<Pdfium, AppError> {
         }
 
         match Pdfium::bind_to_library(candidate) {
-            Ok(bindings) => return Ok(Pdfium::new(bindings)),
+            Ok(bindings) => {
+                return Ok(remember_pdfium(Pdfium::new(bindings)));
+            }
+            Err(PdfiumError::PdfiumLibraryBindingsAlreadyInitialized) => {
+                if let Some(pdfium) = PDFIUM.get() {
+                    return Ok(pdfium);
+                }
+                return Ok(remember_pdfium(Pdfium::default()));
+            }
             Err(error) => last_error = Some(format!("{} ({error})", candidate.display())),
         }
     }
 
-    Pdfium::bind_to_system_library()
-        .map(Pdfium::new)
-        .map_err(|error| {
+    match Pdfium::bind_to_system_library() {
+        Ok(bindings) => Ok(remember_pdfium(Pdfium::new(bindings))),
+        Err(PdfiumError::PdfiumLibraryBindingsAlreadyInitialized) => {
+            if let Some(pdfium) = PDFIUM.get() {
+                return Ok(pdfium);
+            }
+            Ok(remember_pdfium(Pdfium::default()))
+        }
+        Err(error) => Err({
             AppError::Unsupported(format!(
                 "Pdfium is unavailable. Bundle pdfium.dll or install a system Pdfium library. System lookup failed: {error}.{}",
                 last_error
                     .map(|message| format!(" Last attempted library: {message}."))
                     .unwrap_or_default()
             ))
-        })
+        }),
+    }
+}
+
+fn pdf_document_cache() -> &'static Mutex<Option<CachedPdfDocument>> {
+    PDF_DOCUMENT_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn pdf_cache_key(meta: &FileMetadata) -> PdfDocumentCacheKey {
+    PdfDocumentCacheKey {
+        path: meta.path.clone(),
+        size: meta.size,
+        modified: meta.modified,
+    }
+}
+
+fn with_pdf_document<T>(
+    path: &Path,
+    pdfium_candidates: &[PathBuf],
+    read_document: impl FnOnce(&PdfDocument<'static>, &FileMetadata) -> Result<T, AppError>,
+) -> Result<T, AppError> {
+    let meta = native_viewer_meta(path)?;
+    let key = pdf_cache_key(&meta);
+    let mut cache = pdf_document_cache()
+        .lock()
+        .map_err(|_| AppError::Unsupported("PDF document cache is unavailable.".into()))?;
+
+    let should_load = cache
+        .as_ref()
+        .map(|cached| cached.key != key)
+        .unwrap_or(true);
+
+    if should_load {
+        let pdfium = pdfium_ref(pdfium_candidates)?;
+        let bytes = fs::read(path)?;
+        let document = pdfium
+            .load_pdf_from_byte_vec(bytes, None)
+            .map_err(|error| document_error("Unable to open PDF", error))?;
+        *cache = Some(CachedPdfDocument {
+            key: key.clone(),
+            document,
+        });
+    }
+
+    let cached = cache
+        .as_ref()
+        .ok_or_else(|| AppError::Unsupported("PDF document cache did not load.".into()))?;
+    read_document(&cached.document, &meta)
 }
 
 fn pdf_bookmark_node(bookmark: PdfBookmark<'_>, serial: &mut usize) -> TocNode {
@@ -570,47 +657,43 @@ fn pdf_bookmark_node(bookmark: PdfBookmark<'_>, serial: &mut usize) -> TocNode {
 
 fn pdf_info_impl(path: String, pdfium_candidates: Vec<PathBuf>) -> Result<PdfInfo, AppError> {
     let path = normalized_path(path)?;
-    let meta = native_viewer_meta(&path)?;
-    let pdfium = open_pdfium(&pdfium_candidates)?;
-    let document = pdfium
-        .load_pdf_from_file(&path, None)
-        .map_err(|error| document_error("Unable to open PDF", error))?;
+    with_pdf_document(&path, &pdfium_candidates, |document, meta| {
+        let page_count = document.pages().len() as usize;
+        let mut pages = Vec::with_capacity(page_count);
+        for index in 0..page_count {
+            let page = document
+                .pages()
+                .get(index as PdfPageIndex)
+                .map_err(|error| document_error("Unable to inspect PDF page", error))?;
+            pages.push(PdfPageInfo {
+                index,
+                width: page.width().value,
+                height: page.height().value,
+            });
+        }
 
-    let page_count = document.pages().len() as usize;
-    let mut pages = Vec::with_capacity(page_count);
-    for index in 0..page_count {
-        let page = document
-            .pages()
-            .get(index as PdfPageIndex)
-            .map_err(|error| document_error("Unable to inspect PDF page", error))?;
-        pages.push(PdfPageInfo {
-            index,
-            width: page.width().value,
-            height: page.height().value,
-        });
-    }
+        let mut serial = 0;
+        let toc = document
+            .bookmarks()
+            .root()
+            .map(|root| pdf_bookmark_node(root, &mut serial))
+            .map(|root| {
+                if root.page_index.is_none() && !root.children.is_empty() {
+                    root.children
+                } else {
+                    vec![root]
+                }
+            })
+            .unwrap_or_default();
 
-    let mut serial = 0;
-    let toc = document
-        .bookmarks()
-        .root()
-        .map(|root| pdf_bookmark_node(root, &mut serial))
-        .map(|root| {
-            if root.page_index.is_none() && !root.children.is_empty() {
-                root.children
-            } else {
-                vec![root]
-            }
+        Ok(PdfInfo {
+            path: meta.path.clone(),
+            name: meta.name.clone(),
+            size: meta.size,
+            page_count,
+            pages,
+            toc,
         })
-        .unwrap_or_default();
-
-    Ok(PdfInfo {
-        path: meta.path,
-        name: meta.name,
-        size: meta.size,
-        page_count,
-        pages,
-        toc,
     })
 }
 
@@ -621,42 +704,39 @@ fn pdf_render_page_impl(
     pdfium_candidates: Vec<PathBuf>,
 ) -> Result<PdfPageRender, AppError> {
     let path = normalized_path(path)?;
-    let _meta = native_viewer_meta(&path)?;
-    let pdfium = open_pdfium(&pdfium_candidates)?;
-    let document = pdfium
-        .load_pdf_from_file(&path, None)
-        .map_err(|error| document_error("Unable to open PDF", error))?;
-    let page_count = document.pages().len() as usize;
+    with_pdf_document(&path, &pdfium_candidates, |document, _meta| {
+        let page_count = document.pages().len() as usize;
 
-    if page_index >= page_count {
-        return Err(AppError::InvalidPath(format!(
-            "Page {} is outside this PDF.",
-            page_index + 1
-        )));
-    }
+        if page_index >= page_count {
+            return Err(AppError::InvalidPath(format!(
+                "Page {} is outside this PDF.",
+                page_index + 1
+            )));
+        }
 
-    let page = document
-        .pages()
-        .get(page_index as PdfPageIndex)
-        .map_err(|error| document_error("Unable to render PDF page", error))?;
-    let width = target_width.clamp(320, 2600) as Pixels;
-    let image = page
-        .render_with_config(&PdfRenderConfig::new().set_target_width(width))
-        .map_err(|error| document_error("Unable to render PDF page", error))?
-        .as_image()
-        .map_err(|error| document_error("Unable to render PDF page", error))?;
+        let page = document
+            .pages()
+            .get(page_index as PdfPageIndex)
+            .map_err(|error| document_error("Unable to render PDF page", error))?;
+        let width = target_width.clamp(320, 2600) as Pixels;
+        let image = page
+            .render_with_config(&PdfRenderConfig::new().set_target_width(width))
+            .map_err(|error| document_error("Unable to render PDF page", error))?
+            .as_image()
+            .map_err(|error| document_error("Unable to render PDF page", error))?;
 
-    let mut png = Cursor::new(Vec::new());
-    image
-        .write_to(&mut png, ImageFormat::Png)
-        .map_err(|error| document_error("Unable to encode PDF page", error))?;
+        let mut png = Cursor::new(Vec::new());
+        image
+            .write_to(&mut png, ImageFormat::Png)
+            .map_err(|error| document_error("Unable to encode PDF page", error))?;
 
-    Ok(PdfPageRender {
-        page_index,
-        width: image.width(),
-        height: image.height(),
-        mime_type: "image/png".into(),
-        data_base64: general_purpose::STANDARD.encode(png.into_inner()),
+        Ok(PdfPageRender {
+            page_index,
+            width: image.width(),
+            height: image.height(),
+            mime_type: "image/png".into(),
+            data_base64: general_purpose::STANDARD.encode(png.into_inner()),
+        })
     })
 }
 
@@ -952,6 +1032,67 @@ fn save_file(path: String, contents: String) -> Result<FileMetadata, AppError> {
 #[tauri::command]
 fn updater_transport_enabled() -> bool {
     cfg!(feature = "updater-full")
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    fn minimal_pdf() -> Vec<u8> {
+        let objects = [
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents 4 0 R >>\nendobj\n",
+            "4 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n",
+        ];
+        let mut pdf = String::from("%PDF-1.4\n");
+        let mut offsets = Vec::new();
+        for object in objects {
+            offsets.push(pdf.len());
+            pdf.push_str(object);
+        }
+
+        let xref_offset = pdf.len();
+        pdf.push_str("xref\n0 5\n0000000000 65535 f \n");
+        for offset in offsets {
+            pdf.push_str(&format!("{offset:010} 00000 n \n"));
+        }
+        pdf.push_str(&format!(
+            "trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n"
+        ));
+        pdf.into_bytes()
+    }
+
+    #[test]
+    fn pdfium_can_be_reused_for_info_then_page_render() {
+        let pdfium_dll = PathBuf::from("resources")
+            .join("pdfium")
+            .join("windows-x64")
+            .join("pdfium.dll");
+
+        if !pdfium_dll.exists() {
+            return;
+        }
+
+        let pdf_path = std::env::temp_dir().join(format!(
+            "bnote-pdfium-reuse-{}.pdf",
+            std::process::id()
+        ));
+        fs::write(&pdf_path, minimal_pdf()).expect("write test pdf");
+        let path = pdf_path.to_string_lossy().into_owned();
+        let candidates = vec![pdfium_dll];
+
+        let info = pdf_info_impl(path.clone(), candidates.clone()).expect("read pdf info");
+        assert_eq!(info.page_count, 1);
+
+        let rendered =
+            pdf_render_page_impl(path.clone(), 0, 360, candidates).expect("render after info");
+        assert_eq!(rendered.page_index, 0);
+        assert_eq!(rendered.mime_type, "image/png");
+        assert!(!rendered.data_base64.is_empty());
+
+        let _ = fs::remove_file(pdf_path);
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

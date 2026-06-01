@@ -18,22 +18,28 @@ import type {
   ThemeMode,
 } from "@/types";
 import {
+  DOCUMENT_OUTLINE_COLLAPSED_KEY,
   EDITOR_SETTINGS_KEY,
   MAX_RECENT_FILES,
   RECENT_FILES_KEY,
   SIDEBAR_COLLAPSED_KEY,
   STORE_FILE,
   THEME_MODE_KEY,
+  ZEN_MODE_KEY,
   isDirty,
   isEditableDocument,
+  isFilesystemDocument,
+  isUntitledDocument,
   lineCount,
   tabIdForPath,
   toErrorMessage,
+  untitledPathForId,
 } from "@/utils/files";
 
 type AppState = {
   activeTabId: string | null;
   activeFolder: string | null;
+  documentOutlineCollapsed: boolean;
   editorSettings: EditorSettings;
   error: string | null;
   folderTree: FolderTree | null;
@@ -51,6 +57,7 @@ type AppState = {
   closeTab: (tabId: string) => Promise<void>;
   copyActiveFileInfo: () => Promise<void>;
   copyActivePath: () => Promise<void>;
+  createNewFile: () => void;
   hydratePreferences: () => Promise<void>;
   openActiveExternally: () => Promise<void>;
   openFiles: (paths: string[]) => Promise<void>;
@@ -65,6 +72,7 @@ type AppState = {
   saveActiveTab: () => Promise<boolean>;
   saveActiveTabAs: () => Promise<boolean>;
   saveTab: (tabId: string) => Promise<boolean>;
+  saveTabAs: (tabId: string) => Promise<boolean>;
   setActiveTab: (tabId: string | null) => void;
   setCsvViewMode: (tabId: string, mode: CsvViewMode) => void;
   setDragActive: (isDragActive: boolean) => void;
@@ -75,8 +83,11 @@ type AppState = {
   setThemeMode: (mode: ThemeMode) => Promise<void>;
   setWordWrap: (wordWrap: boolean) => Promise<void>;
   showSystemInfo: () => Promise<void>;
+  toggleDocumentOutline: () => Promise<void>;
   toggleSidebar: () => Promise<void>;
+  toggleZenMode: () => Promise<void>;
   updateActiveContent: (content: string) => void;
+  zenMode: boolean;
 };
 
 const defaultEditorSettings: EditorSettings = {
@@ -109,6 +120,7 @@ function defaultCsvViewMode(document: FileDocument): CsvViewMode {
 export const useAppStore = create<AppState>((set, get) => ({
   activeTabId: null,
   activeFolder: null,
+  documentOutlineCollapsed: false,
   editorSettings: defaultEditorSettings,
   error: null,
   folderTree: null,
@@ -121,17 +133,22 @@ export const useAppStore = create<AppState>((set, get) => ({
   store: null,
   tabs: [],
   themeMode: "dark",
+  zenMode: false,
 
   hydratePreferences: async () => {
     try {
       const store = await Store.load(STORE_FILE);
+      const documentOutlineCollapsed = await store.get<boolean>(DOCUMENT_OUTLINE_COLLAPSED_KEY);
       const recentFiles = await store.get<string[]>(RECENT_FILES_KEY);
       const sidebarCollapsed = await store.get<boolean>(SIDEBAR_COLLAPSED_KEY);
       const themeMode = await store.get<ThemeMode>(THEME_MODE_KEY);
       const editorSettings = await store.get<Partial<EditorSettings>>(EDITOR_SETTINGS_KEY);
+      const zenMode = await store.get<boolean>(ZEN_MODE_KEY);
       await exists(".", { baseDir: BaseDirectory.AppConfig }).catch(() => false);
 
       set({
+        documentOutlineCollapsed:
+          typeof documentOutlineCollapsed === "boolean" ? documentOutlineCollapsed : false,
         editorSettings: {
           ...defaultEditorSettings,
           ...(editorSettings && typeof editorSettings === "object" ? editorSettings : {}),
@@ -145,10 +162,52 @@ export const useAppStore = create<AppState>((set, get) => ({
           themeMode === "light" || themeMode === "dark" || themeMode === "system"
             ? themeMode
             : "dark",
+        zenMode: typeof zenMode === "boolean" ? zenMode : false,
       });
     } catch (caught) {
       set({ error: toErrorMessage(caught) });
     }
+  },
+
+  createNewFile: () => {
+    const existingNames = new Set(get().tabs.map((tab) => tab.document.name));
+    let index = 1;
+    while (existingNames.has(`Untitled-${index}.txt`)) index += 1;
+
+    const id =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${index}`;
+    const path = untitledPathForId(id);
+    const name = `Untitled-${index}.txt`;
+    const document: FileDocument = {
+      path,
+      name,
+      extension: "txt",
+      size: 0,
+      modified: null,
+      kind: "text",
+      content: "",
+      encoding: "utf-8",
+      lineCount: 0,
+      editable: true,
+      truncated: false,
+      previewBytes: 0,
+    };
+
+    set((state) => ({
+      activeTabId: path,
+      tabs: [
+        ...state.tabs,
+        {
+          id: path,
+          document,
+          content: "",
+          csvViewMode: "raw",
+          lastSavedContent: "",
+        },
+      ],
+    }));
   },
 
   rememberFile: async (path: string) => {
@@ -282,6 +341,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   saveTab: async (tabId: string) => {
     const tab = get().tabs.find((candidate) => candidate.id === tabId);
     if (!tab || !isEditableDocument(tab.document)) return false;
+    if (isUntitledDocument(tab.document)) return get().saveTabAs(tabId);
 
     set({ error: null, isBusy: true });
     try {
@@ -327,7 +387,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   saveActiveTabAs: async () => {
-    const activeTab = get().tabs.find((tab) => tab.id === get().activeTabId) ?? null;
+    const activeTabId = get().activeTabId;
+    return activeTabId ? get().saveTabAs(activeTabId) : false;
+  },
+
+  saveTabAs: async (tabId: string) => {
+    const activeTab = get().tabs.find((tab) => tab.id === tabId) ?? null;
     const selected = await save({
       title: "Save note as",
       defaultPath: activeTab?.document.name ?? "Untitled.txt",
@@ -349,23 +414,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         );
 
         if (!activeTab) {
-          return {
-            activeTabId: nextTabId,
-            tabs: [
-              ...withoutDuplicate,
-              {
-                id: nextTabId,
-                document,
-                content: nextContent,
-                csvViewMode: defaultCsvViewMode(document),
-                lastSavedContent: nextContent,
-              },
-            ],
-          };
+          return {};
         }
 
         return {
-          activeTabId: nextTabId,
+          activeTabId: state.activeTabId === activeTab.id ? nextTabId : state.activeTabId,
           tabs: withoutDuplicate.map((tab) =>
             tab.id === activeTab.id
               ? {
@@ -419,17 +472,21 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   openActiveExternally: async () => {
     const activeTab = get().tabs.find((tab) => tab.id === get().activeTabId);
-    if (activeTab) await openPath(activeTab.document.path);
+    if (activeTab && isFilesystemDocument(activeTab.document)) {
+      await openPath(activeTab.document.path);
+    }
   },
 
   revealActiveFile: async () => {
     const activeTab = get().tabs.find((tab) => tab.id === get().activeTabId);
-    if (activeTab) await revealItemInDir(activeTab.document.path);
+    if (activeTab && isFilesystemDocument(activeTab.document)) {
+      await revealItemInDir(activeTab.document.path);
+    }
   },
 
   copyActivePath: async () => {
     const activeTab = get().tabs.find((tab) => tab.id === get().activeTabId);
-    if (!activeTab) return;
+    if (!activeTab || !isFilesystemDocument(activeTab.document)) return;
 
     try {
       await writeText(activeTab.document.path);
@@ -564,6 +621,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     const sidebarCollapsed = !get().sidebarCollapsed;
     set({ sidebarCollapsed });
     await persistValue(get().store, SIDEBAR_COLLAPSED_KEY, sidebarCollapsed);
+  },
+
+  toggleDocumentOutline: async () => {
+    const documentOutlineCollapsed = !get().documentOutlineCollapsed;
+    set({ documentOutlineCollapsed });
+    await persistValue(get().store, DOCUMENT_OUTLINE_COLLAPSED_KEY, documentOutlineCollapsed);
+  },
+
+  toggleZenMode: async () => {
+    const zenMode = !get().zenMode;
+    set({ zenMode });
+    await persistValue(get().store, ZEN_MODE_KEY, zenMode);
   },
 
   updateActiveContent: (content) => {

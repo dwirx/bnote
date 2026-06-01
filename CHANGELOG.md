@@ -13,6 +13,9 @@
 - Added folder opening with a limited workspace tree in the sidebar.
 - Added a clear recent action for the recent files list.
 - Added editor preferences for line numbers, word wrap, font size, and tab size.
+- Added new untitled file tabs with first-save Save As behavior.
+- Added Zen mode with F11 and Ctrl+Alt+Z shortcuts for focused reading/editing.
+- Added collapsible PDF/EPUB chapter and contents sidebars with Ctrl+Alt+B shortcut.
 - Added clipboard actions for copying the active file path and file details.
 - Added system info, restart, and updater status actions in the app menu.
 - Added Tauri plugins for filesystem, OS, clipboard, process, and optional updater support.
@@ -23,7 +26,16 @@
 - Large UTF-8 files now open in read-only preview mode instead of being rejected as binary files.
 - Binary file handling now reports non-editable metadata more explicitly.
 - Save behavior now relies on document editability so editable CSV files can be saved safely.
+- App menu actions are grouped by File, View, Clipboard, Editor, and System with visible shortcuts.
+- Workspace actions now separate New, File, and Folder entry points to reduce duplicate controls.
+- The old duplicated global toolbar was removed in favor of contextual viewer controls.
 - Windows desktop bundles now target NSIS by default.
+
+### Fixed
+
+- Fixed PDF rendering after the first PDF metadata load by reusing the initialized Pdfium binding instead of rebinding `pdfium.dll` for every rendered page.
+- Cached the active PDFium document by file path, size, and modified time so page rendering does not reopen the same PDF for every visible page.
+- Added a WebView2 PDF fallback for PDFs that PDFium rejects with internal format errors, so compatible Windows PDF rendering can still open the document inline.
 
 ### Performance
 

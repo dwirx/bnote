@@ -3,6 +3,7 @@ import {
   BookOpen,
   ChevronDown,
   ChevronRight,
+  FilePlus2,
   FileText,
   Folder,
   FolderOpen,
@@ -92,6 +93,7 @@ export function Sidebar() {
   const activeTabId = useAppStore((state) => state.activeTabId);
   const activeFolder = useAppStore((state) => state.activeFolder);
   const clearRecentFiles = useAppStore((state) => state.clearRecentFiles);
+  const createNewFile = useAppStore((state) => state.createNewFile);
   const folderTree = useAppStore((state) => state.folderTree);
   const folderTreeTruncated = useAppStore((state) => state.folderTreeTruncated);
   const isBusy = useAppStore((state) => state.isBusy);
@@ -134,30 +136,14 @@ export function Sidebar() {
         <span className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-muted">
           Workspace
         </span>
-        <div className="flex items-center gap-1">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7 text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-            disabled={isBusy}
-            onClick={() => void openFolderFromDialog()}
-          >
-            <Folder className="size-4" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7 text-sidebar-muted hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-            disabled={isBusy}
-            onClick={() => void openFromDialog()}
-          >
-            <FolderOpen className="size-4" />
-          </Button>
-        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 p-3">
-        <Button className="h-8 bg-primary text-xs font-semibold" disabled={isBusy} onClick={() => void openFromDialog()}>
+      <div className="grid grid-cols-3 gap-2 p-3">
+        <Button className="h-8 bg-primary text-xs font-semibold" onClick={createNewFile}>
+          <FilePlus2 className="size-4" />
+          New
+        </Button>
+        <Button className="h-8 text-xs font-semibold" variant="outline" disabled={isBusy} onClick={() => void openFromDialog()}>
           <FolderOpen className="size-4" />
           File
         </Button>

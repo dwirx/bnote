@@ -7,9 +7,12 @@ import {
   ExternalLink,
   Loader2,
   Minus,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAppStore } from "@/stores/useAppStore";
 import type { EpubChapter, EpubInfo, FileDocument, TocNode } from "@/types";
 import { formatBytes } from "@/utils/files";
 
@@ -115,6 +118,8 @@ function EpubTocTree({
 }
 
 export function EpubViewer({ document, onOpenExternal }: EpubViewerProps) {
+  const documentOutlineCollapsed = useAppStore((state) => state.documentOutlineCollapsed);
+  const toggleDocumentOutline = useAppStore((state) => state.toggleDocumentOutline);
   const [info, setInfo] = useState<EpubInfo | null>(null);
   const [chapter, setChapter] = useState<EpubChapter | null>(null);
   const [selectedHref, setSelectedHref] = useState<string | null>(null);
@@ -195,6 +200,15 @@ export function EpubViewer({ document, onOpenExternal }: EpubViewerProps) {
             size="icon"
             variant="ghost"
             className="h-8 w-8"
+            onClick={() => void toggleDocumentOutline()}
+            title={documentOutlineCollapsed ? "Show chapters" : "Hide chapters"}
+          >
+            {documentOutlineCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8"
             disabled={!chapter?.previousHref || isLoading}
             onClick={() => chapter?.previousHref && setSelectedHref(chapter.previousHref)}
             title="Previous chapter"
@@ -257,8 +271,12 @@ export function EpubViewer({ document, onOpenExternal }: EpubViewerProps) {
         </div>
       </div>
 
-      <div className="grid min-h-0 grid-cols-[230px_minmax(0,1fr)] bg-background/60">
-        <aside className="min-h-0 overflow-auto border-r border-border bg-sidebar/70 p-2">
+      <div
+        className="grid min-h-0 bg-background/60"
+        style={{ gridTemplateColumns: documentOutlineCollapsed ? "0 minmax(0,1fr)" : "230px minmax(0,1fr)" }}
+      >
+        <aside className="min-h-0 overflow-hidden border-r border-border bg-sidebar/70">
+          <div className="h-full overflow-auto p-2">
           <div className="mb-2 flex items-center gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-sidebar-muted">
             <BookOpen className="size-3.5" />
             Chapters
@@ -287,6 +305,7 @@ export function EpubViewer({ document, onOpenExternal }: EpubViewerProps) {
             </p>
           )}
           <div className="mt-3 px-1 text-[10px] text-sidebar-muted">{formatBytes(document.size)}</div>
+          </div>
         </aside>
 
         <div className="relative min-h-0 bg-muted/45">
