@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added a refreshed BNote desktop app icon source and regenerated Tauri icon assets for installer and executable branding.
+- Added a GitHub Actions release workflow that builds the Windows NSIS installer and publishes GitHub releases from app version tags.
 - Added a CodeMirror-powered editor with syntax highlighting for common text and code formats.
 - Added CSV table preview with a raw text fallback view.
 - Added native Rust-backed PDF and EPUB readers.
