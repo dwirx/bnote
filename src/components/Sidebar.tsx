@@ -141,7 +141,7 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="flex min-h-0 w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+    <aside className="flex h-full min-h-0 w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
       <div className="flex h-10 items-center justify-between border-b border-sidebar-border px-3">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-muted">
           Workspace
@@ -206,7 +206,7 @@ export function Sidebar() {
         </ScrollArea>
       </div>
 
-      <div className="border-t border-sidebar-border">
+      <div className="flex min-h-40 max-h-[42vh] shrink-0 flex-col border-t border-sidebar-border">
         <div className="space-y-3 p-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-sidebar-muted" />
@@ -236,7 +236,7 @@ export function Sidebar() {
           </div>
         </div>
 
-        <ScrollArea className="max-h-52 px-2">
+        <ScrollArea className="min-h-0 flex-1 px-2">
           {filteredRecentFiles.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-5 py-8 text-center text-xs text-sidebar-muted">
               <FileText className="size-7 opacity-60" />

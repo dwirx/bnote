@@ -249,7 +249,7 @@ function App() {
       <main
         className="relative grid h-screen overflow-hidden bg-background text-foreground"
         style={{
-          gridTemplateRows: "40px minmax(0, 1fr)",
+          gridTemplateRows: "36px minmax(0, 1fr)",
         }}
       >
         {isDragActive ? (
@@ -267,7 +267,8 @@ function App() {
               </div>
               <strong className="text-base font-semibold text-foreground">{droppedPathCountLabel(dragPathCount)}</strong>
               <span className="max-w-sm text-xs leading-5 text-muted-foreground">
-                Markdown, PDF, EPUB, DOCX, comics, code files, and folders open through the same safe file pipeline.
+                Markdown, PDF, EPUB, DOCX, images, comics, code files, and folders open through
+                the same safe file pipeline.
               </span>
             </div>
           </div>

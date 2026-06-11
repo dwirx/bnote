@@ -8,6 +8,51 @@ export const STORE_FILE = "settings.json";
 export const THEME_MODE_KEY = "themeMode";
 export const ZEN_MODE_KEY = "zenMode";
 export const MAX_RECENT_FILES = 12;
+export const imageFileExtensions = [
+  "apng",
+  "arw",
+  "avif",
+  "bmp",
+  "cr2",
+  "cr3",
+  "dib",
+  "dng",
+  "gif",
+  "heic",
+  "heif",
+  "ico",
+  "j2k",
+  "jfif",
+  "jp2",
+  "jpe",
+  "jpeg",
+  "jpg",
+  "jxl",
+  "nef",
+  "nrw",
+  "orf",
+  "pbm",
+  "pef",
+  "pgm",
+  "png",
+  "pnm",
+  "ppm",
+  "qoi",
+  "raf",
+  "raw",
+  "rw2",
+  "rwl",
+  "sr2",
+  "srf",
+  "srw",
+  "svg",
+  "svgz",
+  "tga",
+  "tif",
+  "tiff",
+  "webp",
+  "x3f",
+] as const;
 
 const textFileExtensions = new Set([
   "bat",
@@ -115,6 +160,7 @@ export function getLanguageLabel(document: FileDocument | null | undefined) {
     return document.encoding === "kindle-unsupported" ? "Kindle external" : "Kindle preview";
   }
   if (document?.kind === "comic") return "Comic archive";
+  if (document?.kind === "image") return "Image";
   if (!document?.extension) return "Plain text";
   const ext = document.extension.toLowerCase();
   if (ext === "md" || ext === "mdx") return "Markdown";

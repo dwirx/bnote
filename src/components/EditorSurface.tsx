@@ -52,8 +52,8 @@ export function EditorSurface() {
             <div className="space-y-2">
               <h2 className="text-lg font-semibold text-foreground">No File Open</h2>
               <p className="text-sm leading-6 text-muted-foreground">
-                Open or drop text, CSV, code, PDF, EPUB, DOCX, Kindle books, comics, or folders.
-                Huge text files open in preview mode.
+                Open or drop text, CSV, code, PDF, EPUB, DOCX, Kindle books, images, comics, or
+                folders. Huge text files open in preview mode.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -76,7 +76,7 @@ export function EditorSurface() {
         <Suspense fallback={<ViewerLoading />}>
           <EpubViewer document={document} onOpenExternal={() => void openActiveExternally()} />
         </Suspense>
-      ) : document.kind === "comic" ? (
+      ) : document.kind === "comic" || document.kind === "image" ? (
         <Suspense fallback={<ViewerLoading />}>
           <ComicViewer document={document} onOpenExternal={() => void openActiveExternally()} />
         </Suspense>

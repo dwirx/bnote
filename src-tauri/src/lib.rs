@@ -1,5 +1,5 @@
 use base64::{engine::general_purpose, Engine as _};
-use image::ImageFormat;
+use image::{ImageFormat, ImageReader};
 use mobi::Mobi;
 use pdfium_render::prelude::*;
 use rbook::Epub;
@@ -20,14 +20,24 @@ use zip::ZipArchive;
 const MAX_EDITABLE_BYTES: u64 = 5 * 1024 * 1024;
 const MAX_PREVIEW_BYTES: u64 = 512 * 1024;
 const MAX_NATIVE_VIEWER_BYTES: u64 = 150 * 1024 * 1024;
+const MAX_IMAGE_PAGE_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_FOLDER_DEPTH: usize = 3;
 const MAX_FOLDER_ENTRIES: usize = 500;
 const SKIPPED_FOLDER_NAMES: &[&str] = &[".git", "dist", "node_modules", "target"];
+const IMAGE_FILE_EXTENSIONS: &[&str] = &[
+    "apng", "arw", "avif", "bmp", "cr2", "cr3", "dib", "dng", "gif", "heic", "heif", "ico",
+    "j2k", "jfif", "jp2", "jpe", "jpeg", "jpg", "jxl", "nef", "nrw", "orf", "pbm", "pef",
+    "pgm", "png", "pnm", "ppm", "qoi", "raf", "raw", "rw2", "rwl", "sr2", "srf", "srw", "svg",
+    "svgz", "tga", "tif", "tiff", "webp", "x3f",
+];
 const SUPPORTED_FOLDER_FILE_EXTENSIONS: &[&str] = &[
-    "azw3", "bat", "c", "cbr", "cbz", "conf", "cpp", "cs", "css", "csv", "doc", "docx", "epub",
-    "go", "html", "ini", "java", "js", "json", "jsx", "kfx", "log", "lua", "md", "mdx", "mobi",
-    "pdf", "php", "py", "rs", "sh", "sql", "svelte", "toml", "ts", "tsx", "txt", "vue", "xml",
-    "yaml", "yml",
+    "apng", "arw", "avif", "azw3", "bat", "bmp", "c", "cbr", "cbz", "conf", "cpp", "cr2",
+    "cr3", "cs", "css", "csv", "dib", "dng", "doc", "docx", "epub", "gif", "go", "heic",
+    "heif", "html", "ico", "ini", "j2k", "java", "jfif", "jp2", "jpe", "jpeg", "jpg", "js",
+    "json", "jsx", "jxl", "kfx", "log", "lua", "md", "mdx", "mobi", "nef", "nrw", "orf",
+    "pbm", "pdf", "pef", "pgm", "php", "png", "pnm", "ppm", "py", "qoi", "raf", "raw", "rs",
+    "rw2", "rwl", "sh", "sql", "sr2", "srf", "srw", "svg", "svgz", "svelte", "tga", "tif",
+    "tiff", "toml", "ts", "tsx", "txt", "vue", "webp", "x3f", "xml", "yaml", "yml",
 ];
 const MAX_COMIC_PAGES: usize = 2000;
 const MAX_COMIC_PAGE_BYTES: u64 = 35 * 1024 * 1024;
@@ -194,6 +204,8 @@ struct ComicPageRender {
     page_index: usize,
     name: String,
     mime_type: String,
+    width: Option<u32>,
+    height: Option<u32>,
     data_base64: String,
 }
 
@@ -275,6 +287,21 @@ fn extension_is(meta: &FileMetadata, expected: &str) -> bool {
         .as_deref()
         .map(|extension| extension.eq_ignore_ascii_case(expected))
         .unwrap_or(false)
+}
+
+fn extension_in(meta: &FileMetadata, candidates: &[&str]) -> bool {
+    meta.extension
+        .as_deref()
+        .map(|extension| {
+            candidates
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(extension))
+        })
+        .unwrap_or(false)
+}
+
+fn is_image_file(meta: &FileMetadata) -> bool {
+    extension_in(meta, IMAGE_FILE_EXTENSIONS)
 }
 
 fn document_from_kind(meta: FileMetadata, kind: &str, encoding: &str) -> FileDocument {
@@ -541,6 +568,10 @@ fn document_for(path: &Path) -> Result<FileDocument, AppError> {
         return Ok(document_from_kind(meta, "comic", "comic"));
     }
 
+    if is_image_file(&meta) {
+        return Ok(document_from_kind(meta, "image", "image"));
+    }
+
     if meta.size > MAX_EDITABLE_BYTES {
         let preview = read_preview_bytes(path)?;
         return Ok(match utf8_content(preview) {
@@ -675,12 +706,69 @@ fn native_viewer_meta(path: &Path) -> Result<FileMetadata, AppError> {
 fn image_mime_type(name: &str) -> Option<&'static str> {
     let extension = name.rsplit('.').next()?.to_ascii_lowercase();
     match extension.as_str() {
-        "jpg" | "jpeg" => Some("image/jpeg"),
+        "jpg" | "jpeg" | "jpe" | "jfif" => Some("image/jpeg"),
         "png" => Some("image/png"),
+        "apng" => Some("image/apng"),
         "webp" => Some("image/webp"),
         "gif" => Some("image/gif"),
-        "bmp" => Some("image/bmp"),
+        "bmp" | "dib" => Some("image/bmp"),
+        "svg" | "svgz" => Some("image/svg+xml"),
+        "avif" => Some("image/avif"),
+        "heic" => Some("image/heic"),
+        "heif" => Some("image/heif"),
+        "tif" | "tiff" => Some("image/tiff"),
+        "ico" => Some("image/x-icon"),
+        "jp2" | "j2k" => Some("image/jp2"),
+        "jxl" => Some("image/jxl"),
+        "tga" => Some("image/x-tga"),
+        "qoi" => Some("image/qoi"),
+        "pnm" | "pbm" | "pgm" | "ppm" => Some("image/x-portable-anymap"),
+        "dng" => Some("image/x-adobe-dng"),
+        "cr2" => Some("image/x-canon-cr2"),
+        "cr3" => Some("image/x-canon-cr3"),
+        "nef" | "nrw" => Some("image/x-nikon-nef"),
+        "arw" | "srf" | "sr2" => Some("image/x-sony-arw"),
+        "orf" => Some("image/x-olympus-orf"),
+        "rw2" | "rwl" => Some("image/x-panasonic-raw"),
+        "raf" => Some("image/x-fuji-raf"),
+        "pef" => Some("image/x-pentax-pef"),
+        "srw" => Some("image/x-samsung-srw"),
+        "x3f" => Some("image/x-sigma-x3f"),
+        "raw" => Some("image/x-raw"),
         _ => None,
+    }
+}
+
+fn should_decode_image_to_png(name: &str) -> bool {
+    let Some(extension) = name.rsplit('.').next().map(|value| value.to_ascii_lowercase()) else {
+        return false;
+    };
+    matches!(
+        extension.as_str(),
+        "tif" | "tiff" | "tga" | "qoi" | "pnm" | "pbm" | "pgm" | "ppm"
+    )
+}
+
+fn decoded_image_as_png(path: &Path) -> Result<Vec<u8>, AppError> {
+    let image = ImageReader::open(path)?
+        .with_guessed_format()
+        .map_err(|error| document_error("Unable to inspect image", error))?
+        .decode()
+        .map_err(|error| document_error("Unable to decode image", error))?;
+    let mut png = Cursor::new(Vec::new());
+    image
+        .write_to(&mut png, ImageFormat::Png)
+        .map_err(|error| document_error("Unable to encode image preview", error))?;
+    Ok(png.into_inner())
+}
+
+fn image_dimensions_from_bytes(bytes: &[u8]) -> (Option<u32>, Option<u32>) {
+    match ImageReader::new(Cursor::new(bytes)).with_guessed_format() {
+        Ok(reader) => match reader.into_dimensions() {
+            Ok((width, height)) => (Some(width), Some(height)),
+            Err(_) => (None, None),
+        },
+        Err(_) => (None, None),
     }
 }
 
@@ -857,6 +945,30 @@ fn comic_info_impl(path: String) -> Result<ComicInfo, AppError> {
     })
 }
 
+fn image_info_impl(path: String) -> Result<ComicInfo, AppError> {
+    let path = normalized_path(path)?;
+    let meta = native_viewer_meta(&path)?;
+    if !is_image_file(&meta) {
+        return Err(AppError::Unsupported(
+            "This file is not recognized as an image.".into(),
+        ));
+    }
+
+    let mime_type = image_mime_type(&meta.name).unwrap_or("application/octet-stream");
+    Ok(ComicInfo {
+        path: meta.path.clone(),
+        name: meta.name.clone(),
+        size: meta.size,
+        page_count: 1,
+        pages: vec![ComicPageInfo {
+            index: 0,
+            name: meta.name,
+            size: meta.size,
+            mime_type: mime_type.into(),
+        }],
+    })
+}
+
 fn read_cbz_page(path: &Path, page_name: &str) -> Result<Vec<u8>, AppError> {
     let file = File::open(path)?;
     let mut archive =
@@ -921,11 +1033,58 @@ fn comic_page_impl(path: String, page_index: usize) -> Result<ComicPageRender, A
     } else {
         read_cbr_page(&path, &page.name)?
     };
+    let (width, height) = image_dimensions_from_bytes(&bytes);
 
     Ok(ComicPageRender {
         page_index,
         name: page.name.clone(),
         mime_type: page.mime_type.clone(),
+        width,
+        height,
+        data_base64: general_purpose::STANDARD.encode(bytes),
+    })
+}
+
+fn image_page_impl(path: String, page_index: usize) -> Result<ComicPageRender, AppError> {
+    if page_index != 0 {
+        return Err(AppError::InvalidPath(format!(
+            "Page {} is outside this image.",
+            page_index + 1
+        )));
+    }
+
+    let path = normalized_path(path)?;
+    let meta = native_viewer_meta(&path)?;
+    if !is_image_file(&meta) {
+        return Err(AppError::Unsupported(
+            "This file is not recognized as an image.".into(),
+        ));
+    }
+    if meta.size > MAX_IMAGE_PAGE_BYTES {
+        return Err(AppError::Unsupported(format!(
+            "{} is too large to preview as an image. Open it externally instead.",
+            meta.name
+        )));
+    }
+
+    let (mime_type, bytes) = if should_decode_image_to_png(&meta.name) {
+        ("image/png".to_string(), decoded_image_as_png(&path)?)
+    } else {
+        (
+            image_mime_type(&meta.name)
+                .unwrap_or("application/octet-stream")
+                .to_string(),
+            fs::read(&path)?,
+        )
+    };
+    let (width, height) = image_dimensions_from_bytes(&bytes);
+
+    Ok(ComicPageRender {
+        page_index,
+        name: meta.name,
+        mime_type,
+        width,
+        height,
         data_base64: general_purpose::STANDARD.encode(bytes),
     })
 }
@@ -1435,6 +1594,20 @@ async fn comic_page(path: String, page_index: usize) -> Result<ComicPageRender, 
 }
 
 #[tauri::command]
+async fn image_info(path: String) -> Result<ComicInfo, AppError> {
+    tauri::async_runtime::spawn_blocking(move || image_info_impl(path))
+        .await
+        .map_err(|error| AppError::Unsupported(format!("Image worker failed: {error}")))?
+}
+
+#[tauri::command]
+async fn image_page(path: String, page_index: usize) -> Result<ComicPageRender, AppError> {
+    tauri::async_runtime::spawn_blocking(move || image_page_impl(path, page_index))
+        .await
+        .map_err(|error| AppError::Unsupported(format!("Image renderer failed: {error}")))?
+}
+
+#[tauri::command]
 fn inspect_file(path: String) -> Result<FileDocument, AppError> {
     let path = normalized_path(path)?;
     document_for(&path)
@@ -1568,6 +1741,44 @@ mod format_tests {
     }
 
     #[test]
+    fn image_extensions_are_classified_as_read_only_image_viewers() {
+        let cases = [
+            "jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "avif", "heic", "heif", "tif",
+            "tiff", "ico", "dng", "raw", "cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2",
+            "orf", "rw2", "raf", "pef", "rwl", "srw", "x3f",
+        ];
+
+        for extension in cases {
+            let path = temp_file_with_extension(extension, b"not a real image");
+            let document = document_for(&path).expect("classify image");
+            assert_eq!(document.kind, "image", "{extension} kind");
+            assert_eq!(document.encoding, "image", "{extension} encoding");
+            assert!(!document.editable, "{extension} should be read-only");
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn single_image_info_and_page_render_return_the_original_image() {
+        let path = temp_file_with_extension("png", ONE_PIXEL_PNG);
+
+        let info = image_info_impl(path.to_string_lossy().into_owned()).expect("image info");
+        assert_eq!(info.page_count, 1);
+        assert_eq!(info.pages[0].name, path_name(&path));
+        assert_eq!(info.pages[0].mime_type, "image/png");
+
+        let page = image_page_impl(path.to_string_lossy().into_owned(), 0).expect("image page");
+        assert_eq!(page.page_index, 0);
+        assert_eq!(page.name, path_name(&path));
+        assert_eq!(page.mime_type, "image/png");
+        assert_eq!(page.width, Some(1));
+        assert_eq!(page.height, Some(1));
+        assert_eq!(page.data_base64, general_purpose::STANDARD.encode(ONE_PIXEL_PNG));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn startup_paths_ignore_flags_and_missing_files() {
         let path = temp_file_with_extension("md", b"# Dropped");
         let paths = startup_paths_from_args([
@@ -1609,6 +1820,8 @@ mod format_tests {
         assert_eq!(page.page_index, 0);
         assert_eq!(page.name, "chapter/page2.png");
         assert_eq!(page.mime_type, "image/png");
+        assert_eq!(page.width, Some(1));
+        assert_eq!(page.height, Some(1));
         assert!(!page.data_base64.is_empty());
 
         let _ = fs::remove_file(path);
@@ -1694,6 +1907,8 @@ pub fn run() {
             comic_page,
             epub_chapter,
             epub_info,
+            image_info,
+            image_page,
             inspect_file,
             inspect_path,
             list_folder,

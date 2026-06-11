@@ -7,6 +7,7 @@ export type FileKind =
   | "office"
   | "kindle"
   | "comic"
+  | "image"
   | "binary";
 
 export type FileDocument = {
@@ -107,6 +108,8 @@ export type ComicPageRender = {
   pageIndex: number;
   name: string;
   mimeType: string;
+  width: number | null;
+  height: number | null;
   dataBase64: string;
 };
 

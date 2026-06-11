@@ -81,14 +81,14 @@ export function TitleBar() {
   };
 
   return (
-    <header className="grid h-10 grid-cols-[auto_minmax(0,1fr)_auto] items-center border-b border-border bg-titlebar text-titlebar-foreground shadow-[0_1px_0_color-mix(in_srgb,var(--foreground)_5%,transparent)]">
-      <div className="flex h-full items-center gap-2 pl-2">
+    <header className="grid h-9 grid-cols-[auto_minmax(0,1fr)_auto] items-center border-b border-border bg-titlebar text-titlebar-foreground shadow-[0_1px_0_color-mix(in_srgb,var(--foreground)_5%,transparent)]">
+      <div className="flex h-full items-center gap-1.5 pl-1.5">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               size="icon"
               variant="ghost"
-              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+              className="h-7 w-7 text-muted-foreground hover:text-foreground"
               onClick={() => void toggleSidebar()}
             >
               {sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
@@ -96,8 +96,8 @@ export function TitleBar() {
           </TooltipTrigger>
           <TooltipContent>{sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}</TooltipContent>
         </Tooltip>
-        <div className="flex items-center gap-2 font-semibold">
-          <div className="grid size-6 place-items-center rounded-md bg-primary text-xs text-primary-foreground shadow-sm">
+        <div className="flex items-center gap-1.5 font-semibold">
+          <div className="grid size-5 place-items-center rounded bg-primary text-[11px] text-primary-foreground shadow-sm">
             B
           </div>
           <span className="text-xs tracking-wide text-foreground">BNOTE</span>
@@ -110,7 +110,7 @@ export function TitleBar() {
       </div>
 
       <div
-        className="flex h-full min-w-0 items-center justify-center gap-2 px-3"
+        className="flex h-full min-w-0 items-center justify-center gap-1.5 px-2"
         data-tauri-drag-region
       >
         <FileText className="size-3.5 shrink-0 text-muted-foreground" data-tauri-drag-region />
@@ -129,7 +129,7 @@ export function TitleBar() {
           type="single"
           value={themeMode}
           onValueChange={setMode}
-          className="mr-1 h-7 rounded-md border border-border bg-muted/35 p-0.5"
+          className="mr-1 hidden h-7 rounded-md border border-border bg-muted/35 p-0.5 sm:flex"
         >
           {(["dark", "light", "system"] satisfies ThemeMode[]).map((mode) => (
             <Tooltip key={mode}>
@@ -150,7 +150,7 @@ export function TitleBar() {
             <Button
               size="icon"
               variant="ghost"
-              className="mr-1 h-8 w-8 text-muted-foreground hover:text-foreground"
+              className="mr-1 h-7 w-7 text-muted-foreground hover:text-foreground"
               onClick={createNewFile}
             >
               <FilePlus2 />
@@ -161,7 +161,7 @@ export function TitleBar() {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="icon" variant="ghost" className="mr-2 h-8 w-8 text-muted-foreground hover:text-foreground">
+            <Button size="icon" variant="ghost" className="mr-1 h-7 w-7 text-muted-foreground hover:text-foreground">
               <Menu />
             </Button>
           </DropdownMenuTrigger>

@@ -30,6 +30,7 @@ import {
   isEditableDocument,
   isFilesystemDocument,
   isUntitledDocument,
+  imageFileExtensions,
   lineCount,
   tabIdForPath,
   toErrorMessage,
@@ -54,7 +55,9 @@ type AppState = {
   themeMode: ThemeMode;
   checkForUpdates: () => Promise<void>;
   clearRecentFiles: () => Promise<void>;
-  closeTab: (tabId: string) => Promise<void>;
+  closeAllTabs: () => Promise<void>;
+  closeTab: (tabId: string) => Promise<boolean>;
+  closeTabsToRight: (tabId: string) => Promise<void>;
   copyActiveFileInfo: () => Promise<void>;
   copyActivePath: () => Promise<void>;
   createNewFile: () => void;
@@ -306,6 +309,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             "kfx",
             "cbz",
             "cbr",
+            ...imageFileExtensions,
           ],
         },
       ],
@@ -460,7 +464,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   closeTab: async (tabId: string) => {
     const tab = get().tabs.find((candidate) => candidate.id === tabId);
-    if (!tab) return;
+    if (!tab) return false;
 
     if (isDirty(tab)) {
       const result = await message(`Save changes to ${tab.document.name}?`, {
@@ -473,9 +477,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         },
       });
       const normalized = normalizeDialogResult(result);
-      if (normalized.includes("cancel")) return;
+      if (normalized.includes("cancel")) return false;
       if ((normalized.includes("save") || normalized === "yes") && !(await get().saveTab(tab.id))) {
-        return;
+        return false;
       }
     }
 
@@ -484,6 +488,24 @@ export const useAppStore = create<AppState>((set, get) => ({
         state.activeTabId === tabId ? getNextActiveTabId(state.tabs, tabId) : state.activeTabId,
       tabs: state.tabs.filter((candidate) => candidate.id !== tabId),
     }));
+    return true;
+  },
+
+  closeTabsToRight: async (tabId: string) => {
+    const tabIndex = get().tabs.findIndex((tab) => tab.id === tabId);
+    if (tabIndex < 0) return;
+
+    const tabIds = get().tabs.slice(tabIndex + 1).map((tab) => tab.id);
+    for (const id of tabIds) {
+      if (!(await get().closeTab(id))) return;
+    }
+  },
+
+  closeAllTabs: async () => {
+    const tabIds = get().tabs.map((tab) => tab.id);
+    for (const id of tabIds) {
+      if (!(await get().closeTab(id))) return;
+    }
   },
 
   openActiveExternally: async () => {
