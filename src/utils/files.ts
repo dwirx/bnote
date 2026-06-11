@@ -108,6 +108,13 @@ export function getLanguageLabel(document: FileDocument | null | undefined) {
   if (document?.kind === "csv") return "CSV";
   if (document?.kind === "pdf") return "PDF";
   if (document?.kind === "epub") return "EPUB";
+  if (document?.kind === "office") {
+    return document.encoding === "office-legacy" ? "Word document" : "DOCX preview";
+  }
+  if (document?.kind === "kindle") {
+    return document.encoding === "kindle-unsupported" ? "Kindle external" : "Kindle preview";
+  }
+  if (document?.kind === "comic") return "Comic archive";
   if (!document?.extension) return "Plain text";
   const ext = document.extension.toLowerCase();
   if (ext === "md" || ext === "mdx") return "Markdown";

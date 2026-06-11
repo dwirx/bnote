@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   BookOpen,
@@ -15,28 +15,12 @@ import { Button } from "@/components/ui/button";
 import { useAppStore } from "@/stores/useAppStore";
 import type { EpubChapter, EpubInfo, FileDocument, TocNode } from "@/types";
 import { formatBytes } from "@/utils/files";
+import { epubTocTargetMatches, firstTocTarget, flattenToc, hrefFragment, hrefWithoutFragment } from "@/utils/toc";
 
 type EpubViewerProps = {
   document: FileDocument;
   onOpenExternal: () => void;
 };
-
-function stripAnchor(href: string) {
-  return href.split(/[?#]/)[0] ?? href;
-}
-
-function flattenToc(nodes: TocNode[]): TocNode[] {
-  return nodes.flatMap((node) => [node, ...flattenToc(node.children)]);
-}
-
-function firstTocTarget(nodes: TocNode[]): string | null {
-  for (const node of nodes) {
-    if (node.target) return node.target;
-    const childTarget = firstTocTarget(node.children);
-    if (childTarget) return childTarget;
-  }
-  return null;
-}
 
 function srcDocFor(html: string, fontSize: number, lineHeight: number) {
   const css = `<style>
@@ -90,7 +74,7 @@ function EpubTocTree({
     <div className={depth === 0 ? "space-y-1" : "mt-1 space-y-1"}>
       {nodes.map((node) => {
         const target = node.target || firstTocTarget(node.children);
-        const isActive = Boolean(target && activeHref && stripAnchor(target) === stripAnchor(activeHref));
+        const isActive = Boolean(target && epubTocTargetMatches(target, activeHref));
 
         return (
           <div key={node.id}>
@@ -120,6 +104,7 @@ function EpubTocTree({
 export function EpubViewer({ document, onOpenExternal }: EpubViewerProps) {
   const documentOutlineCollapsed = useAppStore((state) => state.documentOutlineCollapsed);
   const toggleDocumentOutline = useAppStore((state) => state.toggleDocumentOutline);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [info, setInfo] = useState<EpubInfo | null>(null);
   const [chapter, setChapter] = useState<EpubChapter | null>(null);
   const [selectedHref, setSelectedHref] = useState<string | null>(null);
@@ -132,7 +117,7 @@ export function EpubViewer({ document, onOpenExternal }: EpubViewerProps) {
   const flatToc = useMemo(() => flattenToc(info?.toc ?? []), [info?.toc]);
   const activeTitle = useMemo(() => {
     if (!selectedHref) return null;
-    return flatToc.find((node) => stripAnchor(node.target) === stripAnchor(selectedHref))?.title ?? null;
+    return flatToc.find((node) => epubTocTargetMatches(node.target, selectedHref))?.title ?? null;
   }, [flatToc, selectedHref]);
 
   useEffect(() => {
@@ -172,7 +157,6 @@ export function EpubViewer({ document, onOpenExternal }: EpubViewerProps) {
       .then((nextChapter) => {
         if (!cancelled) {
           setChapter(nextChapter);
-          setSelectedHref(nextChapter.href);
         }
       })
       .catch((caught) => {
@@ -186,6 +170,27 @@ export function EpubViewer({ document, onOpenExternal }: EpubViewerProps) {
       cancelled = true;
     };
   }, [document.path, selectedHref]);
+
+  const scrollToSelectedAnchor = useCallback(() => {
+    const frame = iframeRef.current;
+    const frameWindow = frame?.contentWindow;
+    const frameDocument = frame?.contentDocument;
+    if (!frameWindow || !frameDocument) return;
+
+    const fragment = hrefFragment(selectedHref);
+    if (!fragment) {
+      frameWindow.scrollTo({ top: 0 });
+      return;
+    }
+
+    const target = frameDocument.getElementById(fragment) ?? frameDocument.getElementsByName(fragment)[0];
+    target?.scrollIntoView({ block: "start" });
+  }, [selectedHref]);
+
+  useEffect(() => {
+    if (!chapter) return;
+    requestAnimationFrame(scrollToSelectedAnchor);
+  }, [chapter, scrollToSelectedAnchor]);
 
   const isLoading = isLoadingInfo || isLoadingChapter;
   const creators = info?.creators.filter(Boolean).join(", ");
@@ -289,7 +294,7 @@ export function EpubViewer({ document, onOpenExternal }: EpubViewerProps) {
                 <button
                   key={item.href}
                   className={`block w-full truncate rounded px-2 py-1.5 text-left text-xs ${
-                    selectedHref && stripAnchor(selectedHref) === stripAnchor(item.href)
+                    selectedHref && hrefWithoutFragment(selectedHref) === hrefWithoutFragment(item.href)
                       ? "bg-sidebar-accent text-sidebar-accent-foreground"
                       : "text-sidebar-foreground hover:bg-sidebar-accent"
                   }`}
@@ -330,7 +335,9 @@ export function EpubViewer({ document, onOpenExternal }: EpubViewerProps) {
             </div>
           ) : chapter ? (
             <iframe
+              ref={iframeRef}
               className="h-full w-full border-0 bg-white"
+              onLoad={scrollToSelectedAnchor}
               sandbox=""
               srcDoc={srcDocFor(chapter.html, fontSize, lineHeight)}
               title={activeTitle ?? info?.title ?? document.name}

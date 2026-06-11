@@ -68,7 +68,10 @@ export function TitleBar() {
   const activeDirty = isDirty(activeTab);
   const activeUntitled = isUntitledDocument(activeTab?.document);
   const canSave = Boolean(activeTab?.document.editable && (activeDirty || activeUntitled));
-  const hasDocumentOutline = activeTab?.document.kind === "pdf" || activeTab?.document.kind === "epub";
+  const hasDocumentOutline =
+    activeTab?.document.kind === "pdf" ||
+    activeTab?.document.kind === "epub" ||
+    activeTab?.document.kind === "comic";
   const appWindow = getCurrentWindow();
 
   const setMode = (mode: string) => {

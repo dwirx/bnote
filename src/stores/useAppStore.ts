@@ -290,7 +290,23 @@ export const useAppStore = create<AppState>((set, get) => ({
       filters: [
         {
           name: "Supported files",
-          extensions: ["txt", "md", "csv", "json", "ts", "js", "pdf", "epub"],
+          extensions: [
+            "txt",
+            "md",
+            "csv",
+            "json",
+            "ts",
+            "js",
+            "pdf",
+            "epub",
+            "doc",
+            "docx",
+            "mobi",
+            "azw3",
+            "kfx",
+            "cbz",
+            "cbr",
+          ],
         },
       ],
     });

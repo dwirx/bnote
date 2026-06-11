@@ -1,4 +1,13 @@
-export type FileKind = "text" | "csv" | "largeText" | "pdf" | "epub" | "binary";
+export type FileKind =
+  | "text"
+  | "csv"
+  | "largeText"
+  | "pdf"
+  | "epub"
+  | "office"
+  | "kindle"
+  | "comic"
+  | "binary";
 
 export type FileDocument = {
   path: string;
@@ -77,6 +86,28 @@ export type EpubChapter = {
   previousHref: string | null;
   nextHref: string | null;
   html: string;
+};
+
+export type ComicPageInfo = {
+  index: number;
+  name: string;
+  size: number;
+  mimeType: string;
+};
+
+export type ComicInfo = {
+  path: string;
+  name: string;
+  size: number;
+  pageCount: number;
+  pages: ComicPageInfo[];
+};
+
+export type ComicPageRender = {
+  pageIndex: number;
+  name: string;
+  mimeType: string;
+  dataBase64: string;
 };
 
 export type PathInspection = {

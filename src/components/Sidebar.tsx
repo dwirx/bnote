@@ -3,6 +3,7 @@ import {
   BookOpen,
   ChevronDown,
   ChevronRight,
+  FileArchive,
   FilePlus2,
   FileText,
   Folder,
@@ -24,6 +25,15 @@ function nodeIcon(node: FolderTreeNode, expanded: boolean) {
   }
 
   if (node.extension?.toLowerCase() === "epub") return <BookOpen className="size-3.5" />;
+  if (["mobi", "azw3", "kfx"].includes(node.extension?.toLowerCase() ?? "")) {
+    return <BookOpen className="size-3.5" />;
+  }
+  if (["doc", "docx"].includes(node.extension?.toLowerCase() ?? "")) {
+    return <FileText className="size-3.5" />;
+  }
+  if (["cbz", "cbr"].includes(node.extension?.toLowerCase() ?? "")) {
+    return <FileArchive className="size-3.5" />;
+  }
   return <FileText className="size-3.5" />;
 }
 

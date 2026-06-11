@@ -9,6 +9,9 @@
 - Added native Rust-backed PDF and EPUB readers.
 - Added scrollable multi-page PDF rendering with lazy Pdfium page rasterization, page jump, zoom, fit width, and clickable bookmark/page navigation.
 - Added native EPUB parsing with metadata, TOC, spine navigation, scrollable chapter reading, font controls, and inlined EPUB image/CSS resources.
+- Added read-only DOCX, MOBI, and AZW3 previews with safe fallback messaging for unsupported or protected files.
+- Added DOC and KFX tabs with metadata and external-open fallback messaging.
+- Added native CBZ and CBR comic readers with lazy page loading, natural page ordering, zoom, fit-width, and page navigation.
 - Bundled Windows x64 `pdfium.dll` for release builds.
 - Added folder opening with a limited workspace tree in the sidebar.
 - Added a clear recent action for the recent files list.
@@ -29,6 +32,7 @@
 - App menu actions are grouped by File, View, Clipboard, Editor, and System with visible shortcuts.
 - Workspace actions now separate New, File, and Folder entry points to reduce duplicate controls.
 - The old duplicated global toolbar was removed in favor of contextual viewer controls.
+- Supported file dialogs and folder trees now include AZW3, KFX, MOBI, DOC, DOCX, CBR, and CBZ files.
 - Windows desktop bundles now target NSIS by default.
 
 ### Fixed

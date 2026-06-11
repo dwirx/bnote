@@ -8,6 +8,10 @@ import { formatBytes, formatDate } from "@/utils/files";
 
 const PdfViewer = lazy(() => import("@/components/PdfViewer").then((module) => ({ default: module.PdfViewer })));
 const EpubViewer = lazy(() => import("@/components/EpubViewer").then((module) => ({ default: module.EpubViewer })));
+const ComicViewer = lazy(() => import("@/components/ComicViewer").then((module) => ({ default: module.ComicViewer })));
+const ReadableDocumentViewer = lazy(() =>
+  import("@/components/ReadableDocumentViewer").then((module) => ({ default: module.ReadableDocumentViewer })),
+);
 
 function ViewerLoading() {
   return (
@@ -59,7 +63,8 @@ export function EditorSurface() {
             <div className="space-y-2">
               <h2 className="text-lg font-semibold text-foreground">No File Open</h2>
               <p className="text-sm leading-6 text-muted-foreground">
-                Open or drop text, CSV, code, PDF, EPUB, or folders. Huge text files open in preview mode.
+                Open or drop text, CSV, code, PDF, EPUB, DOCX, Kindle books, comics, or folders.
+                Huge text files open in preview mode.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -81,6 +86,18 @@ export function EditorSurface() {
       ) : document.kind === "epub" ? (
         <Suspense fallback={<ViewerLoading />}>
           <EpubViewer document={document} onOpenExternal={() => void openActiveExternally()} />
+        </Suspense>
+      ) : document.kind === "comic" ? (
+        <Suspense fallback={<ViewerLoading />}>
+          <ComicViewer document={document} onOpenExternal={() => void openActiveExternally()} />
+        </Suspense>
+      ) : document.kind === "office" || document.kind === "kindle" ? (
+        <Suspense fallback={<ViewerLoading />}>
+          <ReadableDocumentViewer
+            document={document}
+            onOpenExternal={() => void openActiveExternally()}
+            onReveal={() => void revealActiveFile()}
+          />
         </Suspense>
       ) : document.kind === "binary" ? (
         <div className="grid place-items-center rounded-lg border border-border bg-editor p-6">

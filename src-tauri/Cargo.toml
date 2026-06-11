@@ -29,7 +29,9 @@ tauri-plugin-store = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
+docx-lite = "0.2.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
+mobi = "0.8.0"
 pdfium-render = "0.9.1"
 rbook = { version = "0.7.7", default-features = false, features = ["threadsafe"] }
 regex = "1"
@@ -41,6 +43,8 @@ tauri-plugin-updater = { version = "2.10.1", default-features = false, features 
     "zip",
 ], optional = true }
 tauri-plugin-process = "2.3.1"
+unrar-ng = "0.7.7"
+zip = "5.1.1"
 
 [profile.release]
 strip = true

@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { useAppStore } from "@/stores/useAppStore";
 import type { FileDocument, PdfInfo, PdfPageInfo, PdfPageRender, TocNode } from "@/types";
 import { formatBytes } from "@/utils/files";
+import { flattenToc, tocNodePageIndex } from "@/utils/toc";
 
 type PdfViewerProps = {
   document: FileDocument;
@@ -33,10 +34,6 @@ function renderKey(pageIndex: number, targetWidth: number) {
   return `${pageIndex}:${targetWidth}`;
 }
 
-function flattenToc(nodes: TocNode[]): TocNode[] {
-  return nodes.flatMap((node) => [node, ...flattenToc(node.children)]);
-}
-
 function PdfTocTree({
   nodes,
   activePage,
@@ -51,7 +48,8 @@ function PdfTocTree({
   return (
     <div className={depth === 0 ? "space-y-1" : "mt-1 space-y-1"}>
       {nodes.map((node) => {
-        const pageIndex = node.pageIndex ?? 0;
+        const pageIndex = tocNodePageIndex(node);
+        const canJump = pageIndex != null;
         const isActive = pageIndex === activePage;
 
         return (
@@ -61,10 +59,13 @@ function PdfTocTree({
                 isActive
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                   : "text-sidebar-foreground hover:bg-sidebar-accent"
-              }`}
+              } disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent`}
+              disabled={!canJump}
               style={{ paddingLeft: `${8 + depth * 12}px` }}
               title={node.title}
-              onClick={() => onJump(pageIndex)}
+              onClick={() => {
+                if (pageIndex != null) onJump(pageIndex);
+              }}
             >
               {node.title}
             </button>

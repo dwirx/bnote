@@ -1,10 +1,12 @@
 use base64::{engine::general_purpose, Engine as _};
 use image::ImageFormat;
+use mobi::Mobi;
 use pdfium_render::prelude::*;
 use rbook::Epub;
 use regex::{Captures, Regex};
 use serde::Serialize;
 use std::{
+    cmp::Ordering,
     fs::{self, File},
     io::{Cursor, Read},
     path::{Path, PathBuf},
@@ -12,6 +14,8 @@ use std::{
     time::UNIX_EPOCH,
 };
 use tauri::Manager;
+use unrar_ng::Archive;
+use zip::ZipArchive;
 
 const MAX_EDITABLE_BYTES: u64 = 5 * 1024 * 1024;
 const MAX_PREVIEW_BYTES: u64 = 512 * 1024;
@@ -20,10 +24,13 @@ const MAX_FOLDER_DEPTH: usize = 3;
 const MAX_FOLDER_ENTRIES: usize = 500;
 const SKIPPED_FOLDER_NAMES: &[&str] = &[".git", "dist", "node_modules", "target"];
 const SUPPORTED_FOLDER_FILE_EXTENSIONS: &[&str] = &[
-    "bat", "c", "conf", "cpp", "cs", "css", "csv", "epub", "go", "html", "ini", "java", "js",
-    "json", "jsx", "log", "lua", "md", "mdx", "pdf", "php", "py", "rs", "sh", "sql", "svelte",
-    "toml", "ts", "tsx", "txt", "vue", "xml", "yaml", "yml",
+    "azw3", "bat", "c", "cbr", "cbz", "conf", "cpp", "cs", "css", "csv", "doc", "docx",
+    "epub", "go", "html", "ini", "java", "js", "json", "jsx", "kfx", "log", "lua", "md",
+    "mdx", "mobi", "pdf", "php", "py", "rs", "sh", "sql", "svelte", "toml", "ts", "tsx",
+    "txt", "vue", "xml", "yaml", "yml",
 ];
+const MAX_COMIC_PAGES: usize = 2000;
+const MAX_COMIC_PAGE_BYTES: u64 = 35 * 1024 * 1024;
 static PDFIUM: OnceLock<Pdfium> = OnceLock::new();
 static PDF_DOCUMENT_CACHE: OnceLock<Mutex<Option<CachedPdfDocument>>> = OnceLock::new();
 
@@ -164,6 +171,34 @@ struct PdfPageRender {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ComicPageInfo {
+    index: usize,
+    name: String,
+    size: u64,
+    mime_type: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ComicInfo {
+    path: String,
+    name: String,
+    size: u64,
+    page_count: usize,
+    pages: Vec<ComicPageInfo>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ComicPageRender {
+    page_index: usize,
+    name: String,
+    mime_type: String,
+    data_base64: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct EpubSpineItem {
     index: usize,
     href: String,
@@ -259,6 +294,31 @@ fn document_from_kind(meta: FileMetadata, kind: &str, encoding: &str) -> FileDoc
     }
 }
 
+fn read_only_document(
+    meta: FileMetadata,
+    kind: &str,
+    encoding: &str,
+    content: Option<String>,
+) -> FileDocument {
+    let line_count = content.as_deref().map(line_count).unwrap_or(0);
+    let preview_bytes = content.as_ref().map(|value| value.len() as u64).unwrap_or(0);
+
+    FileDocument {
+        path: meta.path,
+        name: meta.name,
+        extension: meta.extension,
+        size: meta.size,
+        modified: meta.modified,
+        kind: kind.into(),
+        content,
+        encoding: encoding.into(),
+        line_count,
+        editable: false,
+        truncated: false,
+        preview_bytes,
+    }
+}
+
 fn line_count(content: &str) -> usize {
     if content.is_empty() {
         0
@@ -343,6 +403,94 @@ fn utf8_content(bytes: Vec<u8>) -> Option<String> {
     }
 }
 
+fn collapse_whitespace(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn strip_html_text(html: &str) -> String {
+    let without_scripts = Regex::new(r"(?is)<script[^>]*>.*?</script>")
+        .expect("valid regex")
+        .replace_all(html, "");
+    let without_scripts = Regex::new(r"(?is)<style[^>]*>.*?</style>")
+        .expect("valid regex")
+        .replace_all(&without_scripts, "");
+    let with_breaks = Regex::new(r"(?i)</?(p|div|br|h[1-6]|li|section|article|tr)[^>]*>")
+        .expect("valid regex")
+        .replace_all(&without_scripts, "\n");
+    let without_tags = Regex::new(r"(?is)<[^>]+>")
+        .expect("valid regex")
+        .replace_all(&with_breaks, "");
+    collapse_whitespace(
+        &without_tags
+            .replace("&nbsp;", " ")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'"),
+    )
+}
+
+fn office_document(path: &Path, meta: FileMetadata) -> FileDocument {
+    match docx_lite::extract_text(path) {
+        Ok(text) if !text.trim().is_empty() => {
+            read_only_document(meta, "office", "office", Some(collapse_whitespace(&text)))
+        }
+        Ok(_) => read_only_document(
+            meta,
+            "office",
+            "office",
+            Some("This DOCX did not contain readable text.".into()),
+        ),
+        Err(error) => read_only_document(
+            meta,
+            "office",
+            "office",
+            Some(format!(
+                "BNote could not extract text from this DOCX. Use Open External to view it.\n\n{error}"
+            )),
+        ),
+    }
+}
+
+fn kindle_document(path: &Path, meta: FileMetadata) -> FileDocument {
+    match Mobi::from_path(path) {
+        Ok(book) => {
+            let mut sections = Vec::new();
+            let title = book.title();
+            if !title.trim().is_empty() {
+                sections.push(format!("# {title}"));
+            }
+            if let Some(author) = book.author().filter(|value| !value.trim().is_empty()) {
+                sections.push(format!("Author: {author}"));
+            }
+
+            let content = strip_html_text(&book.content_as_string_lossy());
+            if !content.trim().is_empty() {
+                sections.push(content);
+            }
+
+            if sections.is_empty() {
+                sections.push("This Kindle file opened, but no readable text was found.".into());
+            }
+
+            read_only_document(meta, "kindle", "kindle", Some(sections.join("\n\n")))
+        }
+        Err(error) => read_only_document(
+            meta,
+            "kindle",
+            "kindle",
+            Some(format!(
+                "BNote could not render this Kindle file. It may be DRM-protected, encrypted, or use an unsupported Kindle variant.\n\n{error}"
+            )),
+        ),
+    }
+}
+
 fn document_for(path: &Path) -> Result<FileDocument, AppError> {
     let meta = metadata_for(path)?;
 
@@ -352,6 +500,42 @@ fn document_for(path: &Path) -> Result<FileDocument, AppError> {
 
     if extension_is(&meta, "epub") {
         return Ok(document_from_kind(meta, "epub", "epub"));
+    }
+
+    if extension_is(&meta, "docx") {
+        return Ok(office_document(path, meta));
+    }
+
+    if extension_is(&meta, "doc") {
+        return Ok(read_only_document(
+            meta,
+            "office",
+            "office-legacy",
+            Some(
+                "Legacy .doc files are not rendered natively yet. Use Open External to view this document."
+                    .into(),
+            ),
+        ));
+    }
+
+    if extension_is(&meta, "mobi") || extension_is(&meta, "azw3") {
+        return Ok(kindle_document(path, meta));
+    }
+
+    if extension_is(&meta, "kfx") {
+        return Ok(read_only_document(
+            meta,
+            "kindle",
+            "kindle-unsupported",
+            Some(
+                "KFX is a proprietary Kindle format and is not rendered natively. Use Open External to view this file."
+                    .into(),
+            ),
+        ));
+    }
+
+    if extension_is(&meta, "cbz") || extension_is(&meta, "cbr") {
+        return Ok(document_from_kind(meta, "comic", "comic"));
     }
 
     if meta.size > MAX_EDITABLE_BYTES {
@@ -483,6 +667,264 @@ fn native_viewer_meta(path: &Path) -> Result<FileMetadata, AppError> {
         )));
     }
     Ok(meta)
+}
+
+fn image_mime_type(name: &str) -> Option<&'static str> {
+    let extension = name.rsplit('.').next()?.to_ascii_lowercase();
+    match extension.as_str() {
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "png" => Some("image/png"),
+        "webp" => Some("image/webp"),
+        "gif" => Some("image/gif"),
+        "bmp" => Some("image/bmp"),
+        _ => None,
+    }
+}
+
+fn natural_compare(left: &str, right: &str) -> Ordering {
+    let mut left_chars = left.chars().peekable();
+    let mut right_chars = right.chars().peekable();
+
+    loop {
+        match (left_chars.peek(), right_chars.peek()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(left_char), Some(right_char))
+                if left_char.is_ascii_digit() && right_char.is_ascii_digit() =>
+            {
+                let mut left_number = String::new();
+                let mut right_number = String::new();
+
+                while left_chars
+                    .peek()
+                    .map(|value| value.is_ascii_digit())
+                    .unwrap_or(false)
+                {
+                    if let Some(value) = left_chars.next() {
+                        left_number.push(value);
+                    }
+                }
+
+                while right_chars
+                    .peek()
+                    .map(|value| value.is_ascii_digit())
+                    .unwrap_or(false)
+                {
+                    if let Some(value) = right_chars.next() {
+                        right_number.push(value);
+                    }
+                }
+
+                let ordering = left_number
+                    .trim_start_matches('0')
+                    .len()
+                    .cmp(&right_number.trim_start_matches('0').len())
+                    .then_with(|| {
+                        left_number
+                            .trim_start_matches('0')
+                            .cmp(right_number.trim_start_matches('0'))
+                    })
+                    .then_with(|| left_number.len().cmp(&right_number.len()));
+                if ordering != Ordering::Equal {
+                    return ordering;
+                }
+            }
+            (Some(left_char), Some(right_char)) => {
+                let ordering = left_char
+                    .to_ascii_lowercase()
+                    .cmp(&right_char.to_ascii_lowercase());
+                left_chars.next();
+                right_chars.next();
+                if ordering != Ordering::Equal {
+                    return ordering;
+                }
+            }
+        }
+    }
+}
+
+fn sorted_comic_pages(mut pages: Vec<ComicPageInfo>) -> Vec<ComicPageInfo> {
+    pages.sort_by(|left, right| natural_compare(&left.name, &right.name));
+    for (index, page) in pages.iter_mut().enumerate() {
+        page.index = index;
+    }
+    pages
+}
+
+fn cbz_pages(path: &Path) -> Result<Vec<ComicPageInfo>, AppError> {
+    let file = File::open(path)?;
+    let mut archive =
+        ZipArchive::new(file).map_err(|error| document_error("Unable to open CBZ", error))?;
+    let mut pages = Vec::new();
+
+    for index in 0..archive.len() {
+        let file = archive
+            .by_index(index)
+            .map_err(|error| document_error("Unable to inspect CBZ", error))?;
+        if !file.is_file() {
+            continue;
+        }
+
+        let name = file.name().replace('\\', "/");
+        let Some(mime_type) = image_mime_type(&name) else {
+            continue;
+        };
+        if file.size() > MAX_COMIC_PAGE_BYTES {
+            continue;
+        }
+
+        pages.push(ComicPageInfo {
+            index: pages.len(),
+            name,
+            size: file.size(),
+            mime_type: mime_type.into(),
+        });
+
+        if pages.len() >= MAX_COMIC_PAGES {
+            break;
+        }
+    }
+
+    Ok(sorted_comic_pages(pages))
+}
+
+fn cbr_pages(path: &Path) -> Result<Vec<ComicPageInfo>, AppError> {
+    let archive = Archive::new(path)
+        .open_for_listing()
+        .map_err(|error| document_error("Unable to open CBR", error))?;
+    let mut pages = Vec::new();
+
+    for entry in archive {
+        let entry = entry.map_err(|error| document_error("Unable to inspect CBR", error))?;
+        if !entry.is_file() {
+            continue;
+        }
+
+        let name = entry.filename.to_string_lossy().replace('\\', "/");
+        let Some(mime_type) = image_mime_type(&name) else {
+            continue;
+        };
+        if entry.unpacked_size > MAX_COMIC_PAGE_BYTES {
+            continue;
+        }
+
+        pages.push(ComicPageInfo {
+            index: pages.len(),
+            name,
+            size: entry.unpacked_size,
+            mime_type: mime_type.into(),
+        });
+
+        if pages.len() >= MAX_COMIC_PAGES {
+            break;
+        }
+    }
+
+    Ok(sorted_comic_pages(pages))
+}
+
+fn comic_pages(path: &Path, meta: &FileMetadata) -> Result<Vec<ComicPageInfo>, AppError> {
+    if extension_is(meta, "cbz") {
+        cbz_pages(path)
+    } else if extension_is(meta, "cbr") {
+        cbr_pages(path)
+    } else {
+        Err(AppError::Unsupported("Unsupported comic archive.".into()))
+    }
+}
+
+fn comic_info_impl(path: String) -> Result<ComicInfo, AppError> {
+    let path = normalized_path(path)?;
+    let meta = native_viewer_meta(&path)?;
+    let pages = comic_pages(&path, &meta)?;
+
+    if pages.is_empty() {
+        return Err(AppError::Unsupported(
+            "This comic archive does not contain supported image pages.".into(),
+        ));
+    }
+
+    Ok(ComicInfo {
+        path: meta.path,
+        name: meta.name,
+        size: meta.size,
+        page_count: pages.len(),
+        pages,
+    })
+}
+
+fn read_cbz_page(path: &Path, page_name: &str) -> Result<Vec<u8>, AppError> {
+    let file = File::open(path)?;
+    let mut archive =
+        ZipArchive::new(file).map_err(|error| document_error("Unable to open CBZ", error))?;
+    let mut page = archive
+        .by_name(page_name)
+        .map_err(|error| document_error("Unable to read CBZ page", error))?;
+
+    if page.size() > MAX_COMIC_PAGE_BYTES {
+        return Err(AppError::Unsupported(format!(
+            "{page_name} is too large to preview."
+        )));
+    }
+
+    let mut bytes = Vec::with_capacity(page.size() as usize);
+    page.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+fn read_cbr_page(path: &Path, page_name: &str) -> Result<Vec<u8>, AppError> {
+    let mut archive = Archive::new(path)
+        .open_for_processing()
+        .map_err(|error| document_error("Unable to open CBR", error))?;
+
+    while let Some(header) = archive
+        .read_header()
+        .map_err(|error| document_error("Unable to read CBR", error))?
+    {
+        let entry_name = header.entry().filename.to_string_lossy().replace('\\', "/");
+        if header.entry().is_file() && entry_name == page_name {
+            if header.entry().unpacked_size > MAX_COMIC_PAGE_BYTES {
+                return Err(AppError::Unsupported(format!(
+                    "{page_name} is too large to preview."
+                )));
+            }
+            let (bytes, _rest) = header
+                .read()
+                .map_err(|error| document_error("Unable to read CBR page", error))?;
+            return Ok(bytes);
+        }
+
+        archive = header
+            .skip()
+            .map_err(|error| document_error("Unable to skip CBR page", error))?;
+    }
+
+    Err(AppError::InvalidPath(format!(
+        "Comic page was not found: {page_name}"
+    )))
+}
+
+fn comic_page_impl(path: String, page_index: usize) -> Result<ComicPageRender, AppError> {
+    let path = normalized_path(path)?;
+    let meta = native_viewer_meta(&path)?;
+    let pages = comic_pages(&path, &meta)?;
+    let page = pages
+        .get(page_index)
+        .ok_or_else(|| AppError::InvalidPath(format!("Page {} is outside this comic.", page_index + 1)))?;
+
+    let bytes = if extension_is(&meta, "cbz") {
+        read_cbz_page(&path, &page.name)?
+    } else {
+        read_cbr_page(&path, &page.name)?
+    };
+
+    Ok(ComicPageRender {
+        page_index,
+        name: page.name.clone(),
+        mime_type: page.mime_type.clone(),
+        data_base64: general_purpose::STANDARD.encode(bytes),
+    })
 }
 
 fn pdfium_candidate_paths(resource_dir: Option<PathBuf>) -> Vec<PathBuf> {
@@ -976,6 +1418,20 @@ async fn epub_chapter(path: String, href: String) -> Result<EpubChapter, AppErro
 }
 
 #[tauri::command]
+async fn comic_info(path: String) -> Result<ComicInfo, AppError> {
+    tauri::async_runtime::spawn_blocking(move || comic_info_impl(path))
+        .await
+        .map_err(|error| AppError::Unsupported(format!("Comic worker failed: {error}")))?
+}
+
+#[tauri::command]
+async fn comic_page(path: String, page_index: usize) -> Result<ComicPageRender, AppError> {
+    tauri::async_runtime::spawn_blocking(move || comic_page_impl(path, page_index))
+        .await
+        .map_err(|error| AppError::Unsupported(format!("Comic renderer failed: {error}")))?
+}
+
+#[tauri::command]
 fn inspect_file(path: String) -> Result<FileDocument, AppError> {
     let path = normalized_path(path)?;
     document_for(&path)
@@ -1032,6 +1488,90 @@ fn save_file(path: String, contents: String) -> Result<FileMetadata, AppError> {
 #[tauri::command]
 fn updater_transport_enabled() -> bool {
     cfg!(feature = "updater-full")
+}
+
+#[cfg(test)]
+mod format_tests {
+    use super::*;
+    use std::io::Write;
+    use zip::{write::SimpleFileOptions, ZipWriter};
+
+    const ONE_PIXEL_PNG: &[u8] = &[
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1,
+        8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 15,
+        4, 0, 9, 251, 3, 253, 167, 154, 164, 100, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96,
+        130,
+    ];
+
+    fn temp_file_with_extension(extension: &str, bytes: &[u8]) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "bnote-format-test-{}-{unique}.{}",
+            std::process::id(),
+            extension
+        ));
+        fs::write(&path, bytes).expect("write test file");
+        path
+    }
+
+    #[test]
+    fn new_supported_extensions_are_classified_as_read_only_viewers() {
+        let cases = [
+            ("docx", "office", "office"),
+            ("doc", "office", "office-legacy"),
+            ("mobi", "kindle", "kindle"),
+            ("azw3", "kindle", "kindle"),
+            ("kfx", "kindle", "kindle-unsupported"),
+            ("cbz", "comic", "comic"),
+            ("cbr", "comic", "comic"),
+        ];
+
+        for (extension, expected_kind, expected_encoding) in cases {
+            let path = temp_file_with_extension(extension, b"not a real document");
+            let document = document_for(&path).expect("classify document");
+            assert_eq!(document.kind, expected_kind, "{extension} kind");
+            assert_eq!(document.encoding, expected_encoding, "{extension} encoding");
+            assert!(!document.editable, "{extension} should be read-only");
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn cbz_info_and_page_render_use_natural_page_order() {
+        let path = temp_file_with_extension("cbz", &[]);
+        let file = File::create(&path).expect("create cbz");
+        let mut zip = ZipWriter::new(file);
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("chapter/page10.png", options)
+            .expect("start page10");
+        zip.write_all(ONE_PIXEL_PNG).expect("write page10");
+        zip.start_file("chapter/page2.png", options)
+            .expect("start page2");
+        zip.write_all(ONE_PIXEL_PNG).expect("write page2");
+        zip.start_file("notes.txt", options).expect("start notes");
+        zip.write_all(b"ignore me").expect("write notes");
+        let mut file = zip.finish().expect("finish cbz");
+        file.flush().expect("flush cbz");
+        file.sync_all().expect("sync cbz");
+        drop(file);
+
+        let info = comic_info_impl(path.to_string_lossy().into_owned()).expect("comic info");
+        assert_eq!(info.page_count, 2);
+        assert_eq!(info.pages[0].name, "chapter/page2.png");
+        assert_eq!(info.pages[1].name, "chapter/page10.png");
+
+        let page = comic_page_impl(path.to_string_lossy().into_owned(), 0).expect("comic page");
+        assert_eq!(page.page_index, 0);
+        assert_eq!(page.name, "chapter/page2.png");
+        assert_eq!(page.mime_type, "image/png");
+        assert!(!page.data_base64.is_empty());
+
+        let _ = fs::remove_file(path);
+    }
 }
 
 #[cfg(all(test, windows))]
@@ -1111,6 +1651,8 @@ pub fn run() {
 
     builder
         .invoke_handler(tauri::generate_handler![
+            comic_info,
+            comic_page,
             epub_chapter,
             epub_info,
             inspect_file,
