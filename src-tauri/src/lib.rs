@@ -24,10 +24,10 @@ const MAX_FOLDER_DEPTH: usize = 3;
 const MAX_FOLDER_ENTRIES: usize = 500;
 const SKIPPED_FOLDER_NAMES: &[&str] = &[".git", "dist", "node_modules", "target"];
 const SUPPORTED_FOLDER_FILE_EXTENSIONS: &[&str] = &[
-    "azw3", "bat", "c", "cbr", "cbz", "conf", "cpp", "cs", "css", "csv", "doc", "docx",
-    "epub", "go", "html", "ini", "java", "js", "json", "jsx", "kfx", "log", "lua", "md",
-    "mdx", "mobi", "pdf", "php", "py", "rs", "sh", "sql", "svelte", "toml", "ts", "tsx",
-    "txt", "vue", "xml", "yaml", "yml",
+    "azw3", "bat", "c", "cbr", "cbz", "conf", "cpp", "cs", "css", "csv", "doc", "docx", "epub",
+    "go", "html", "ini", "java", "js", "json", "jsx", "kfx", "log", "lua", "md", "mdx", "mobi",
+    "pdf", "php", "py", "rs", "sh", "sql", "svelte", "toml", "ts", "tsx", "txt", "vue", "xml",
+    "yaml", "yml",
 ];
 const MAX_COMIC_PAGES: usize = 2000;
 const MAX_COMIC_PAGE_BYTES: u64 = 35 * 1024 * 1024;
@@ -301,7 +301,10 @@ fn read_only_document(
     content: Option<String>,
 ) -> FileDocument {
     let line_count = content.as_deref().map(line_count).unwrap_or(0);
-    let preview_bytes = content.as_ref().map(|value| value.len() as u64).unwrap_or(0);
+    let preview_bytes = content
+        .as_ref()
+        .map(|value| value.len() as u64)
+        .unwrap_or(0);
 
     FileDocument {
         path: meta.path,
@@ -909,9 +912,9 @@ fn comic_page_impl(path: String, page_index: usize) -> Result<ComicPageRender, A
     let path = normalized_path(path)?;
     let meta = native_viewer_meta(&path)?;
     let pages = comic_pages(&path, &meta)?;
-    let page = pages
-        .get(page_index)
-        .ok_or_else(|| AppError::InvalidPath(format!("Page {} is outside this comic.", page_index + 1)))?;
+    let page = pages.get(page_index).ok_or_else(|| {
+        AppError::InvalidPath(format!("Page {} is outside this comic.", page_index + 1))
+    })?;
 
     let bytes = if extension_is(&meta, "cbz") {
         read_cbz_page(&path, &page.name)?
@@ -1490,6 +1493,32 @@ fn updater_transport_enabled() -> bool {
     cfg!(feature = "updater-full")
 }
 
+fn startup_paths_from_args<I, S>(args: I) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    args.into_iter()
+        .filter_map(|arg| {
+            let value = arg.as_ref().trim();
+            if value.is_empty() || value.starts_with("--") || value.starts_with("-") {
+                return None;
+            }
+            let path = PathBuf::from(value);
+            if path.exists() {
+                Some(path.to_string_lossy().into_owned())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn startup_paths() -> Vec<String> {
+    startup_paths_from_args(std::env::args().skip(1))
+}
+
 #[cfg(test)]
 mod format_tests {
     use super::*;
@@ -1497,10 +1526,9 @@ mod format_tests {
     use zip::{write::SimpleFileOptions, ZipWriter};
 
     const ONE_PIXEL_PNG: &[u8] = &[
-        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1,
-        8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 15,
-        4, 0, 9, 251, 3, 253, 167, 154, 164, 100, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96,
-        130,
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6,
+        0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 15, 4, 0, 9,
+        251, 3, 253, 167, 154, 164, 100, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
     ];
 
     fn temp_file_with_extension(extension: &str, bytes: &[u8]) -> PathBuf {
@@ -1537,6 +1565,19 @@ mod format_tests {
             assert!(!document.editable, "{extension} should be read-only");
             let _ = fs::remove_file(path);
         }
+    }
+
+    #[test]
+    fn startup_paths_ignore_flags_and_missing_files() {
+        let path = temp_file_with_extension("md", b"# Dropped");
+        let paths = startup_paths_from_args([
+            "--debug",
+            path.to_string_lossy().as_ref(),
+            "C:\\definitely\\missing\\bnote-file.md",
+        ]);
+
+        assert_eq!(paths, vec![path.to_string_lossy().into_owned()]);
+        let _ = fs::remove_file(path);
     }
 
     #[test]
@@ -1614,10 +1655,8 @@ mod tests {
             return;
         }
 
-        let pdf_path = std::env::temp_dir().join(format!(
-            "bnote-pdfium-reuse-{}.pdf",
-            std::process::id()
-        ));
+        let pdf_path =
+            std::env::temp_dir().join(format!("bnote-pdfium-reuse-{}.pdf", std::process::id()));
         fs::write(&pdf_path, minimal_pdf()).expect("write test pdf");
         let path = pdf_path.to_string_lossy().into_owned();
         let candidates = vec![pdfium_dll];
@@ -1662,6 +1701,7 @@ pub fn run() {
             pdf_info,
             pdf_render_page,
             save_file,
+            startup_paths,
             updater_transport_enabled
         ])
         .run(tauri::generate_context!())

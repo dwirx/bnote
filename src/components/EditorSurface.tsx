@@ -25,7 +25,6 @@ export function EditorSurface() {
   const activeTabId = useAppStore((state) => state.activeTabId);
   const error = useAppStore((state) => state.error);
   const isBusy = useAppStore((state) => state.isBusy);
-  const isDragActive = useAppStore((state) => state.isDragActive);
   const editorSettings = useAppStore((state) => state.editorSettings);
   const tabs = useAppStore((state) => state.tabs);
   const createNewFile = useAppStore((state) => state.createNewFile);
@@ -43,16 +42,6 @@ export function EditorSurface() {
         <div className="absolute right-3 top-3 z-20 flex max-w-md gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive shadow-md">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <span>{error}</span>
-        </div>
-      ) : null}
-
-      {isDragActive ? (
-        <div className="absolute inset-2 z-30 grid place-items-center rounded-lg border border-dashed border-primary bg-background/85 backdrop-blur">
-          <div className="flex flex-col items-center gap-2 text-center">
-            <FolderOpen className="size-9 text-primary" />
-            <strong className="text-sm text-foreground">Drop files to open in tabs</strong>
-            <span className="text-xs text-muted-foreground">Text opens editable. Binary stays protected.</span>
-          </div>
         </div>
       ) : null}
 
